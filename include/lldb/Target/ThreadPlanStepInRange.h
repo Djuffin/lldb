@@ -60,6 +60,10 @@ protected:
                                             lldb::FrameComparison operation,
                                             void *baton);
 
+  static lldb::ThreadPlanSP
+  DefaultStepFromHereCallback(ThreadPlan *current_plan, Flags &flags,
+                              lldb::FrameComparison operation, void *baton);
+
   bool DoWillResume(lldb::StateType resume_state, bool current_plan) override;
 
   bool DoPlanExplainsStop(Event *event_ptr) override;
@@ -70,7 +74,8 @@ protected:
 
   void SetCallbacks() {
     ThreadPlanShouldStopHere::ThreadPlanShouldStopHereCallbacks callbacks(
-        ThreadPlanStepInRange::DefaultShouldStopHereCallback, nullptr);
+        ThreadPlanStepInRange::DefaultShouldStopHereCallback,
+        ThreadPlanStepInRange::DefaultStepFromHereCallback);
     SetShouldStopHereCallbacks(&callbacks, nullptr);
   }
 

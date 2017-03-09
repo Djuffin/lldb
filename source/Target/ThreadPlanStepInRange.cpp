@@ -335,6 +335,7 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
   if (libraries_say_avoid)
     return true;
 
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
   const RegularExpression *avoid_regexp_to_use = m_avoid_regexp_ap.get();
   if (avoid_regexp_to_use == nullptr)
     avoid_regexp_to_use = GetThread().GetSymbolsToAvoidRegexp();
@@ -348,7 +349,6 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
               .GetCString();
       if (frame_function_name) {
         size_t num_matches = 0;
-        Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
         if (log)
           num_matches = 1;
 
@@ -368,7 +368,11 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
           }
         }
         return return_value;
+      } else {
+        return true;
       }
+    } else {
+      return true;
     }
   }
   return false;
@@ -429,6 +433,57 @@ bool ThreadPlanStepInRange::DefaultShouldStopHereCallback(
 
   return should_stop_here;
 }
+
+lldb::ThreadPlanSP
+ThreadPlanStepInRange::DefaultStepFromHereCallback(
+  ThreadPlan *current_plan, Flags &flags, lldb::FrameComparison operation,
+  void *baton) {
+  Thread &thread = current_plan->GetThread();
+  StackFrame *frame = thread.GetStackFrameAtIndex(0).get();
+
+  // Check the library list first, as that's cheapest:
+  bool libraries_say_avoid = false;
+
+  FileSpecList libraries_to_avoid(thread.GetLibrariesToAvoid());
+  size_t num_libraries = libraries_to_avoid.GetSize();
+  if (num_libraries > 0) {
+    SymbolContext sc = frame->GetSymbolContext(eSymbolContextModule);
+    FileSpec frame_library(sc.module_sp->GetFileSpec());
+
+    if (frame_library) {
+      for (size_t i = 0; i < num_libraries; i++) {
+        const FileSpec &file_spec(libraries_to_avoid.GetFileSpecAtIndex(i));
+        if (FileSpec::Equal(file_spec, frame_library, false)) {
+          libraries_say_avoid = true;
+          break;
+        }
+      }
+    }
+  }
+
+  ThreadPlanSP return_plan_sp;
+  if (libraries_say_avoid) {
+    return_plan_sp = thread.QueueThreadPlanForStepOutNoShouldStop(
+            false, nullptr, true, false /* stop_others */, eVoteNo,
+            eVoteNoOpinion, 0 /* frame_index */, true);
+  } else {
+    SymbolContext sc = frame->GetSymbolContext(eSymbolContextLineEntry |
+                                eSymbolContextFunction |
+                                eSymbolContextSymbol);
+    AddressRange range;
+    if (sc.function) {
+      range = sc.function->GetAddressRange();
+    } else if (sc.symbol && sc.symbol->ValueIsAddress()) {
+      range = AddressRange (sc.symbol->GetAddressRef(),
+                            sc.symbol->GetByteSize());
+    }
+    return_plan_sp = current_plan->GetThread().QueueThreadPlanForStepInRange(
+        false, range, sc, nullptr, eOnlyDuringStepping, eLazyBoolCalculate,
+        eLazyBoolNo);
+  }
+  return return_plan_sp;
+}
+
 
 bool ThreadPlanStepInRange::DoPlanExplainsStop(Event *event_ptr) {
   // We always explain a stop.  Either we've just done a single step, in which
