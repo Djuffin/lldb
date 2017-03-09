@@ -335,6 +335,7 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
   if (libraries_say_avoid)
     return true;
 
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
   const RegularExpression *avoid_regexp_to_use = m_avoid_regexp_ap.get();
   if (avoid_regexp_to_use == nullptr)
     avoid_regexp_to_use = GetThread().GetSymbolsToAvoidRegexp();
@@ -348,7 +349,6 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
               .GetCString();
       if (frame_function_name) {
         size_t num_matches = 0;
-        Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
         if (log)
           num_matches = 1;
 
@@ -368,7 +368,11 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
           }
         }
         return return_value;
+      } else {
+        return true;
       }
+    } else {
+      return true;
     }
   }
   return false;

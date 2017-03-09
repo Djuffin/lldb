@@ -13,6 +13,7 @@
 // Project includes
 #include "lldb/Target/ThreadPlanShouldStopHere.h"
 #include "lldb/Symbol/Symbol.h"
+#include "lldb/Symbol/Function.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/Log.h"
@@ -113,9 +114,27 @@ ThreadPlanSP ThreadPlanShouldStopHere::DefaultStepFromHereCallback(
   if (!frame)
     return return_plan_sp;
   SymbolContext sc;
-  sc = frame->GetSymbolContext(eSymbolContextLineEntry | eSymbolContextSymbol);
+  sc = frame->GetSymbolContext(eSymbolContextLineEntry |
+                               eSymbolContextFunction |
+                               eSymbolContextSymbol);
 
-  if (sc.line_entry.line == 0) {
+  AddressRange range;
+  Address cur_pc = frame->GetRegisterContext()->GetPC();
+  LLDB_LOG(log, "EZ: DefaultStepFromHereCallback PC={0}", cur_pc.GetOffset());
+  if (sc.function) {
+    range = sc.function->GetAddressRange();
+  } else if (sc.symbol && sc.symbol->ValueIsAddress()) {
+    range = AddressRange (sc.symbol->GetAddressRef(), sc.symbol->GetByteSize());
+  } else {
+
+    size_t lookahead = 100;
+    range = AddressRange (cur_pc, lookahead);
+  }
+  return_plan_sp = current_plan->GetThread().QueueThreadPlanForStepInRange(
+      false, range, sc, nullptr, eOnlyDuringStepping, eLazyBoolCalculate,
+      eLazyBoolNo);
+
+/*  if (sc.line_entry.line == 0) {
     AddressRange range = sc.line_entry.range;
 
     // If the whole function is marked line 0 just step out, that's easier &
@@ -142,7 +161,7 @@ ThreadPlanSP ThreadPlanShouldStopHere::DefaultStepFromHereCallback(
           false, range, sc, NULL, eOnlyDuringStepping, eLazyBoolCalculate,
           eLazyBoolNo);
     }
-  }
+  }*/
 
   if (!return_plan_sp)
     return_plan_sp =
