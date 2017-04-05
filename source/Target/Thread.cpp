@@ -68,12 +68,14 @@ static PropertyDefinition g_properties[] = {
      nullptr,
      "If true, step-in will not stop in functions with no debug information."},
     {"step-out-avoid-nodebug", OptionValue::eTypeBoolean, true, false, nullptr,
-     nullptr, "If true, when step-in/step-out/step-over leave the current "
-              "frame, they will continue to step out till they come to a "
-              "function with "
-              "debug information.  Passing a frame argument to step-out will "
-              "override this option."},
-    {"step-avoid-regexp", OptionValue::eTypeRegex, true, 0, "^std::", nullptr,
+     nullptr,
+     "If true, when step-in/step-out/step-over leave the current "
+     "frame, they will continue to step out till they come to a "
+     "function with "
+     "debug information.  Passing a frame argument to step-out will "
+     "override this option."},
+    {"step-avoid-regexp", OptionValue::eTypeRegex, true, 0,
+     "^(std::|_[A-Z]|__)", nullptr,
      "A regular expression defining functions step-in won't stop in."},
     {"step-avoid-libraries", OptionValue::eTypeFileSpecList, true, 0, nullptr,
      nullptr, "A list of libraries that source stepping won't stop in."},
@@ -397,7 +399,7 @@ lldb::StopInfoSP Thread::GetStopInfo() {
   bool plan_overrides_trace =
     have_valid_stop_info && have_valid_completed_plan
     && (m_stop_info_sp->GetStopReason() == eStopReasonTrace);
-    
+
   if (have_valid_stop_info && !plan_overrides_trace) {
     return m_stop_info_sp;
   } else if (have_valid_completed_plan) {
@@ -541,7 +543,7 @@ bool Thread::CheckpointThreadState(ThreadStateCheckpoint &saved_state) {
     saved_state.orig_stop_id = process_sp->GetStopID();
   saved_state.current_inlined_depth = GetCurrentInlinedDepth();
   saved_state.m_completed_plan_stack = m_completed_plan_stack;
-	
+
   return true;
 }
 
