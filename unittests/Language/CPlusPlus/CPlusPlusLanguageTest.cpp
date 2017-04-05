@@ -71,6 +71,13 @@ TEST(CPlusPlusLanguage, MethodNameParsing) {
       {"void (*(*(*(*(*(*(*(* const&func1(int))())())())())())())())()", "",
        "func1", "(int)", "", "func1"},
 
+      // Decltype
+      {"decltype(nullptr)&& std::forward<decltype(nullptr)>"
+       "(std::remove_reference<decltype(nullptr)>::type&)",
+       "std", "forward<decltype(nullptr)>",
+       "(std::remove_reference<decltype(nullptr)>::type&)", "",
+       "std::forward<decltype(nullptr)>"},
+
       // Templates
       {"void llvm::PM<llvm::Module, llvm::AM<llvm::Module>>::"
        "addPass<llvm::VP>(llvm::VP)",

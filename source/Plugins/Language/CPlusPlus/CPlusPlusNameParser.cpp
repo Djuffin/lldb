@@ -413,10 +413,22 @@ bool CPlusPlusNameParser::ConsumePtrsAndRefs() {
   return found;
 }
 
+bool CPlusPlusNameParser::ConsumeDecltype() {
+  Bookmark start_position = SetBookmark();
+  if (!ConsumeToken(tok::kw_decltype))
+    return false;
+
+  if (!ConsumeArguments())
+    return false;
+
+  start_position.Remove();
+  return true;
+}
+
 bool CPlusPlusNameParser::ConsumeTypename() {
   Bookmark start_position = SetBookmark();
   SkipTypeQualifiers();
-  if (!ConsumeBuiltinType()) {
+  if (!ConsumeBuiltinType() && !ConsumeDecltype()) {
     if (!ParseFullNameImpl())
       return false;
   }

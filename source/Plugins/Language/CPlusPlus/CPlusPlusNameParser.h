@@ -155,6 +155,9 @@ private:
   // Consumes built-in types like 'int' or 'unsigned long long int'
   bool ConsumeBuiltinType();
 
+  // Consumes types defined via decltype keyword.
+  bool ConsumeDecltype();
+
   // Skips 'const' and 'volatile'
   void SkipPtrsAndRefs();
 
