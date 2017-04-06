@@ -148,4 +148,6 @@ TEST(CPlusPlusLanguage, ExtractContextAndIdentifier) {
       CPlusPlusLanguage::ExtractContextAndIdentifier("321", context, basename));
   EXPECT_FALSE(
       CPlusPlusLanguage::ExtractContextAndIdentifier("", context, basename));
+  EXPECT_FALSE(CPlusPlusLanguage::ExtractContextAndIdentifier(
+      "selector:", context, basename));
 }

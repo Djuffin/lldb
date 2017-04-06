@@ -43,6 +43,8 @@ Optional<ParsedFunction> CPlusPlusNameParser::ParseAsFunctionDefinition() {
   // Finally try to parse the name as a function with non-function return type
   // e.g. int main(int, char*[])
   result = ParseFunctionImpl(true);
+  if (HasMoreTokens())
+    return None;
   return result;
 }
 
@@ -50,6 +52,8 @@ Optional<ParsedName> CPlusPlusNameParser::ParseAsFullName() {
   m_next_token_index = 0;
   Optional<ParsedNameRanges> name_ranges = ParseFullNameImpl();
   if (!name_ranges)
+    return None;
+  if (HasMoreTokens())
     return None;
   ParsedName result;
   result.basename = GetTextForRange(name_ranges.getValue().basename_range);
