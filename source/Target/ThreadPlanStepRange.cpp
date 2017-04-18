@@ -365,6 +365,104 @@ bool ThreadPlanStepRange::SetNextBranchBreakpoint() {
   return false;
 }
 
+bool ThreadPlanStepRange::SetEscapeBreakpoints() {
+  if (!m_instruction_ranges.empty())
+    return true;
+
+  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+  // Stepping through ranges using breakpoints doesn't work yet, but with this
+  // off we fall back to instruction
+  // single stepping.
+  if (!m_use_fast_step)
+    return false;
+
+  if (!m_use_fast_step)
+    return false;
+
+  lldb::addr_t cur_addr = GetThread().GetRegisterContext()->GetPC();
+  ExecutionContext exe_ctx(m_thread.GetProcess());
+  for (auto &addr_range: m_address_ranges) {
+    if (m_address_ranges[i].GetByteSize() != 0 && !m_instruction_ranges[i]) {
+      // Disassemble the address range given:
+      m_instruction_ranges[i] = Disassembler::DisassembleRange(
+          GetTarget().GetArchitecture(),
+          nullptr /* plugin_name */,
+          nullptr /* flavor */,
+          exe_ctx,
+          addr_range,
+          true /* prefer_file_cache */ );
+    }
+  }
+
+  InstructionList *instructions = &m_instruction_ranges[i]->GetInstructionList();
+
+  // Find the current address in our address ranges, and fetch the disassembly
+  // if we haven't already:
+  size_t pc_index;
+  size_t range_index;
+  InstructionList *instructions =
+      GetInstructionsForAddress(cur_addr, range_index, pc_index);
+  if (instructions == nullptr)
+    return false;
+  else {
+    Target &target = GetThread().GetProcess()->GetTarget();
+    uint32_t branch_index;
+    branch_index =
+        instructions->GetIndexOfNextBranchInstruction(pc_index, target);
+
+    Address run_to_address;
+
+    // If we didn't find a branch, run to the end of the range.
+    if (branch_index == UINT32_MAX) {
+      uint32_t last_index = instructions->GetSize() - 1;
+      if (last_index - pc_index > 1) {
+        InstructionSP last_inst =
+            instructions->GetInstructionAtIndex(last_index);
+        size_t last_inst_size = last_inst->GetOpcode().GetByteSize();
+        run_to_address = last_inst->GetAddress();
+        run_to_address.Slide(last_inst_size);
+      }
+    } else if (branch_index - pc_index > 1) {
+      run_to_address =
+          instructions->GetInstructionAtIndex(branch_index)->GetAddress();
+    }
+
+    if (run_to_address.IsValid()) {
+      const bool is_internal = true;
+      m_next_branch_bp_sp =
+          GetTarget().CreateBreakpoint(run_to_address, is_internal, false);
+      if (m_next_branch_bp_sp) {
+        if (log) {
+          lldb::break_id_t bp_site_id = LLDB_INVALID_BREAK_ID;
+          BreakpointLocationSP bp_loc =
+              m_next_branch_bp_sp->GetLocationAtIndex(0);
+          if (bp_loc) {
+            BreakpointSiteSP bp_site = bp_loc->GetBreakpointSite();
+            if (bp_site) {
+              bp_site_id = bp_site->GetID();
+            }
+          }
+          log->Printf("ThreadPlanStepRange::SetNextBranchBreakpoint - Setting "
+                      "breakpoint %d (site %d) to run to address 0x%" PRIx64,
+                      m_next_branch_bp_sp->GetID(), bp_site_id,
+                      run_to_address.GetLoadAddress(
+                          &m_thread.GetProcess()->GetTarget()));
+        }
+        m_next_branch_bp_sp->SetThreadID(m_thread.GetID());
+        m_next_branch_bp_sp->SetBreakpointKind("next-branch-location");
+        return true;
+      } else
+        return false;
+    }
+  }
+  return false;
+
+}
+
+void ThreadPlanStepRange::ClearEscapeBreakpoints() {
+
+}
+
 bool ThreadPlanStepRange::NextRangeBreakpointExplainsStop(
     lldb::StopInfoSP stop_info_sp) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));

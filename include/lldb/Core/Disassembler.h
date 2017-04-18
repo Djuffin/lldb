@@ -294,6 +294,10 @@ public:
   uint32_t GetIndexOfNextBranchInstruction(uint32_t start,
                                            Target &target) const;
 
+  uint32_t GetIndexOfNextEscapeInstruction(uint32_t start,
+                                           const AddressRange& range_to_escape,
+                                           Target &target) const;
+
   uint32_t GetIndexOfInstructionAtLoadAddress(lldb::addr_t load_addr,
                                               Target &target);
 

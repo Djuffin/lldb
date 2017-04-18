@@ -97,6 +97,47 @@ public:
     return m_does_branch == eLazyBoolYes;
   }
 
+  bool CanEscapeRange(
+    const lldb_private::ExecutionContext *exe_ctx,
+    lldb_private::AddressRange range) {
+      std::shared_ptr<DisassemblerLLVMC> disasm_sp(GetDisassembler());
+      bool result = true;
+      if (disasm_sp) {
+        disasm_sp->Lock(this, NULL);
+        DataExtractor data;
+        if (m_opcode.GetData(data)) {
+          bool is_alternate_isa;
+          lldb::addr_t pc = m_address.GetFileAddress();
+
+          DisassemblerLLVMC::LLVMCDisassembler *mc_disasm_ptr =
+              GetDisasmToUse(is_alternate_isa);
+          const uint8_t *opcode_data = data.GetDataStart();
+          const size_t opcode_data_len = data.GetByteSize();
+          llvm::MCInst inst;
+          const size_t inst_size =
+              mc_disasm_ptr->GetMCInst(opcode_data, opcode_data_len, pc, inst);
+          // If we didn't understand the instruction, say it
+          // might escape.
+          if (inst_size != 0) {
+            if (mc_disasm_ptr->CanBranch(inst)) {
+              if (inst.getNumOperands() == 1) {
+                MCOperand &op = inst.getOperand(0);
+                Target *target = exe_ctx->GetTargetPtr();
+                int64_t address;
+                if (target && target->evaluateAsAbsolute(Address)) {
+                  if (range.ContainsLoadAddress(address, target)) {
+                    result = false;
+                  }
+                }
+              }
+            }
+          }
+        }
+      disasm_sp->Unlock();
+    }
+    return result;
+  }
+
   bool HasDelaySlot() override {
     if (m_has_delay_slot == eLazyBoolCalculate) {
       std::shared_ptr<DisassemblerLLVMC> disasm_sp(GetDisassembler());

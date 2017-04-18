@@ -66,6 +66,10 @@ protected:
 
   void ClearNextBranchBreakpoint();
 
+  bool SetEscapeBreakpoints();
+
+  void ClearEscapeBreakpoints();
+
   bool NextRangeBreakpointExplainsStop(lldb::StopInfoSP stop_info_sp);
 
   SymbolContext m_addr_context;
@@ -80,6 +84,7 @@ protected:
   bool m_first_run_event; // We want to broadcast only one running event, our
                           // first.
   lldb::BreakpointSP m_next_branch_bp_sp;
+  std::vector<lldb::BreakpointSP> m_escape_breakpoints;
   bool m_use_fast_step;
   bool m_given_ranges_only;
 

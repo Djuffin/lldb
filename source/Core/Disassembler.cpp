@@ -1141,6 +1141,25 @@ InstructionList::GetIndexOfNextBranchInstruction(uint32_t start,
   return next_branch;
 }
 
+uint32_t InstructionList::GetIndexOfNextEscapeInstruction(uint32_t start,
+                                          const AddressRange& range_to_escape,
+                                          Target &target) const {
+  size_t num_instructions = m_instructions.size();
+
+  uint32_t next_branch = UINT32_MAX;
+  size_t i;
+  for (i = start; i < num_instructions; i++) {
+    lldb::InstructionSP instruction = m_instructions[i];
+    if (instruction->DoesBranch()) {
+      instruction
+      next_branch = i;
+      break;
+    }
+  }
+
+  return next_branch;
+}
+
 uint32_t
 InstructionList::GetIndexOfInstructionAtAddress(const Address &address) {
   size_t num_instructions = m_instructions.size();
