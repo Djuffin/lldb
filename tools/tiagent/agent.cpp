@@ -37,8 +37,16 @@ JNIEXPORT jint JNICALL sub (JNIEnv *env, jobject instance, jint a, jint b) {
 
 typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
 
+void print(const char *str)  {
+  std::ofstream myfile;
+  myfile.open ("/data/data/com.eugene.sum/debug_log.txt", std::ios::out | std::ios::app);
+  myfile << str << "\n";
+  myfile.close();
+}
+
 void* gen_function() {
   using namespace llvm;
+  print("1");
   InitializeNativeTarget();
   LLVMInitializeNativeAsmPrinter();
   LLVMInitializeNativeAsmParser();
@@ -49,6 +57,7 @@ void* gen_function() {
   // Create some module to put our function into it.
   std::unique_ptr<Module> Owner = make_unique<Module>("test", Context);
   Module *M = Owner.get();
+  print("2");
 
   // Now we're going to create function `foo', which returns an int and takes no
   // arguments.
@@ -73,17 +82,26 @@ void* gen_function() {
   // Create the return instruction and add it to the basic block.
   builder.CreateRet(Result);
 
+  print("3");
   // Now we create the JIT.
   EngineBuilder EB(std::move(Owner));
   EB.setMCJITMemoryManager(make_unique<SectionMemoryManager>());
   EB.setUseOrcMCJITReplacement(true);
   ExecutionEngine* EE = EB.create();
+  print("4");
   EE->finalizeObject();
 
+  print("5");
   //delete EE;
   //llvm_shutdown();
   void *result = EE->getPointerToFunction(FooF);
-  ((add_ptr)result)(nullptr, nullptr, 3, 4);
+  if (result == nullptr) {
+    print("null func");
+  } else {
+    print("6");
+    ((add_ptr)result)(nullptr, nullptr, 3, 4);
+    print("7");
+  }
   return result;
 }
 
