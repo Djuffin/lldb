@@ -29,9 +29,10 @@
 #include <mutex>
 #include "jvmti.h"
 
+#define LOG_PREFIX "/data/data/com.eugene.sum/"
+// #define LOG_PREFIX "/usr/local/google/home/ezemtsov/projects/j/"
 
-JNIEXPORT jint JNICALL sub (JNIEnv *env, jobject instance, jint a, jint b) {
-  //return a - b;
+JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) {
   return 42;
 }
 
@@ -39,7 +40,7 @@ typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
 
 void print(const char *str)  {
   std::ofstream myfile;
-  myfile.open ("/data/data/com.eugene.sum/debug_log.txt", std::ios::out | std::ios::app);
+  myfile.open (LOG_PREFIX "debug_log.txt", std::ios::out | std::ios::app);
   myfile << str << "\n";
   myfile.close();
 }
@@ -64,7 +65,7 @@ void* gen_function() {
   Function *FooF =
     cast<Function>(M->getOrInsertFunction("foo", Type::getInt32Ty(Context),
       Type::getDoublePtrTy(Context), Type::getDoublePtrTy(Context),
-          Type::getInt32Ty(Context), Type::getInt32Ty(Context), nullptr));
+          Type::getInt32Ty(Context), Type::getInt32Ty(Context)/*, nullptr*/));
 
   // Add a basic block to the FooF function.
   BasicBlock *BB = BasicBlock::Create(Context, "EntryBlock", FooF);
@@ -87,7 +88,13 @@ void* gen_function() {
   EngineBuilder EB(std::move(Owner));
   EB.setMCJITMemoryManager(make_unique<SectionMemoryManager>());
   EB.setUseOrcMCJITReplacement(true);
+  std::string error_str = "No error";
+  EB.setErrorStr(&error_str);
   ExecutionEngine* EE = EB.create();
+  if (EE == nullptr) {
+    print(error_str.c_str());
+    return nullptr;
+  }
   print("4");
   EE->finalizeObject();
 
@@ -132,14 +139,18 @@ NativeMethodBind(jvmtiEnv *ti,
   error = ti->GetClassSignature(declaring_class, &class_signature_ptr, nullptr);
   if (error != JNI_OK) return;
   if (std::string(method_name_ptr) == "add") {
-    //*new_address_ptr = (void *)sub;
-    *new_address_ptr = gen_function();
+    void *f = gen_function();
+    if (f)
+      *new_address_ptr = f;
+    else
+      *new_address_ptr = (void *)fortytwo;
+
   }
 
   if (class_signature_ptr != nullptr && method_name_ptr != nullptr)
   {
     std::ofstream myfile;
-    myfile.open ("/data/data/com.eugene.sum/bind_log.txt", std::ios::out | std::ios::app);
+    myfile.open (LOG_PREFIX "bind_log.txt", std::ios::out | std::ios::app);
     myfile << "Bind: class:" << class_signature_ptr << " method: " << method_name_ptr << "\n";
     myfile.close();
   }
