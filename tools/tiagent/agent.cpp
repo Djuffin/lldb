@@ -1,4 +1,5 @@
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/DynamicLibrary.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
@@ -32,6 +33,8 @@
 #define LOG_PREFIX "/data/data/com.eugene.sum/"
 // #define LOG_PREFIX "/usr/local/google/home/ezemtsov/projects/j/"
 
+using namespace llvm;
+
 JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) {
   return 42;
 }
@@ -45,69 +48,164 @@ void print(const char *str)  {
   myfile.close();
 }
 
-void* gen_function() {
-  using namespace llvm;
-  print("1");
-  InitializeNativeTarget();
-  LLVMInitializeNativeAsmPrinter();
-  LLVMInitializeNativeAsmParser();
+int wrap_int(int x) {
+  return x;
+}
 
-  LLVMContext *pContext = new LLVMContext();
-  LLVMContext &Context = *pContext;
+void* wrap_ref(void *ref) {
+  return ref;
+}
 
-  // Create some module to put our function into it.
-  std::unique_ptr<Module> Owner = make_unique<Module>("test", Context);
-  Module *M = Owner.get();
-  print("2");
+class Codegen {
+ public:
+  Codegen() {
+    llvm::sys::DynamicLibrary::AddSymbol("wrap_int", reinterpret_cast<void*>(wrap_int));
+    llvm::sys::DynamicLibrary::AddSymbol("wrap_ref", reinterpret_cast<void*>(wrap_ref));
+    InitializeNativeTarget();
+    LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeNativeAsmParser();
+    context_ = make_unique<LLVMContext>();
 
-  // Now we're going to create function `foo', which returns an int and takes no
-  // arguments.
-  Function *FooF =
-    cast<Function>(M->getOrInsertFunction("foo", Type::getInt32Ty(Context),
-      Type::getDoublePtrTy(Context), Type::getDoublePtrTy(Context),
-          Type::getInt32Ty(Context), Type::getInt32Ty(Context)/*, nullptr*/));
-
-  // Add a basic block to the FooF function.
-  BasicBlock *BB = BasicBlock::Create(Context, "EntryBlock", FooF);
-
-  // Create a basic block builder with default parameters.  The builder will
-  // automatically append instructions to the basic block `BB'.
-  IRBuilder<> builder(BB);
-
-  // Tell the basic block builder to attach itself to the new basic block
-  builder.SetInsertPoint(BB);
-
-  // Get pointer to the constant `142'.
-  Value *Result = builder.getInt32(142);
-
-  // Create the return instruction and add it to the basic block.
-  builder.CreateRet(Result);
-
-  print("3");
-  // Now we create the JIT.
-  EngineBuilder EB(std::move(Owner));
-  EB.setMCJITMemoryManager(make_unique<SectionMemoryManager>());
-  EB.setUseOrcMCJITReplacement(true);
-  std::string error_str = "No error";
-  EB.setErrorStr(&error_str);
-  ExecutionEngine* EE = EB.create();
-  if (EE == nullptr) {
-    print(error_str.c_str());
-    return nullptr;
+    EngineBuilder EB(make_unique<Module>("default_module", *context_));
+    EB.setMCJITMemoryManager(make_unique<SectionMemoryManager>());
+    EB.setUseOrcMCJITReplacement(true);
+    EB.setErrorStr(&error_str);
+    engine_ = std::unique_ptr<ExecutionEngine>(EB.create());
   }
-  print("4");
-  EE->finalizeObject();
 
-  print("5");
-  //delete EE;
-  //llvm_shutdown();
-  void *result = EE->getPointerToFunction(FooF);
+  void *gen_transparent_wrapper(const char *name, char *signature, void *func_ptr) {
+    FunctionType *func_type = ParseJavaSignature(signature, 2);
+    if (func_type == nullptr) {
+      return nullptr;
+    }
+
+    auto module = make_unique<Module>(std::string(name) + "_mod", *context_);
+    auto M = module.get();
+    Function* wrap_ref = llvm::Function::Create(ParseJavaSignature("(L;)L;"),
+                                                Function::ExternalLinkage,
+                                                "wrap_ref", M);
+
+    Function *F = cast<Function>(M->getOrInsertFunction(name, func_type));
+    BasicBlock *BB = BasicBlock::Create(*context_, "", F);
+    IRBuilder<> builder(BB);
+
+    std::vector<Argument *> args;
+    for (auto it = F->arg_begin(); it != F->arg_end(); ++it) {
+      args.push_back(&*it);
+    }
+
+    std::vector<Value *> values;
+    for (auto arg : args) {
+      if (arg->getType()->isPointerTy()) {
+        values.push_back(builder.CreateCall(wrap_ref, std::vector<Value *>{arg}));
+      } else {
+        values.push_back(arg);
+      }
+    }
+
+    Value* func_value = builder.CreateIntToPtr(builder.getInt64((uint64_t)func_ptr),func_type->getPointerTo());
+    Value *ret = builder.CreateCall(func_value, values);
+    builder.CreateRet(ret);
+
+    engine_->addModule(std::move(module));
+    void *result = engine_->getPointerToFunction(F);
+    return result;
+  }
+
+ private:
+  llvm::Type *GetPointerType() {
+    return Type::getVoidTy(*context_)->getPointerTo();
+  }
+
+  FunctionType *ParseJavaSignature(const char *str, int extraPtrArgs = 0) {
+    if (str == nullptr) return nullptr;
+    const char* ptr = str;
+    std::function<Type*()> consumeType =
+      [&ptr, &consumeType, this]()->Type * {
+      switch (*ptr) {
+        case 'Z':
+          ptr++;
+          return Type::getInt8Ty(*context_);
+        case 'B':
+          ptr++;
+          return Type::getInt8Ty(*context_);
+        case 'C':
+          ptr++;
+          return Type::getInt16Ty(*context_);
+        case 'S':
+          ptr++;
+          return Type::getInt16Ty(*context_);
+        case 'I':
+          ptr++;
+          return Type::getInt32Ty(*context_);
+        case 'J':
+          ptr++;
+          return Type::getInt64Ty(*context_);
+        case 'F':
+          ptr++;
+          return Type::getFloatTy(*context_);
+        case 'D':
+          ptr++;
+          return Type::getDoubleTy(*context_);
+        case 'V':
+          ptr++;
+          return Type::getVoidTy(*context_);
+        case 'L':
+          while (*ptr && *ptr != ';') ptr++;
+          if (*ptr == ';') {
+            ptr++;
+            return GetPointerType();
+          } else {
+            return nullptr;
+          }
+        case '[': {
+          ptr++;
+          if (consumeType())
+            return GetPointerType();
+          else
+            return nullptr;
+        }
+        default:
+          return nullptr;
+      };
+    };
+
+    if (*ptr != '(') return nullptr;
+    ptr++;
+    std::vector<Type*> args;
+    for (;extraPtrArgs > 0; --extraPtrArgs) {
+      args.push_back(GetPointerType());
+    }
+    Type *returnType;
+    while (*ptr && *ptr != ')') {
+      auto type = consumeType();
+      if (type == nullptr) return nullptr;
+      args.push_back(type);
+    }
+    if (*ptr != ')') return nullptr;
+    ptr++;
+    returnType = consumeType();
+    if (returnType == nullptr || *ptr) return nullptr;
+
+    return FunctionType::get(returnType, args, false);
+
+  }
+
+  std::unique_ptr<LLVMContext> context_;
+  std::unique_ptr<ExecutionEngine> engine_;
+  std::string error_str;
+};
+
+void *gen_function(char* name, char *signature, void *func_ptr) {
+  static Codegen codegen;
+  static int n = 0;
+  char name_buffer[200];
+  sprintf(name_buffer, "%s_ti_%d", name, n++);
+  void *result = codegen.gen_transparent_wrapper(name_buffer, signature, func_ptr);
   if (result == nullptr) {
-    print("null func");
-  } else {
-    print("6");
-    ((add_ptr)result)(nullptr, nullptr, 3, 4);
-    print("7");
+    print("codegen error");
+    print(name_buffer);
+    print(signature);
   }
   return result;
 }
@@ -138,21 +236,11 @@ NativeMethodBind(jvmtiEnv *ti,
   if (error != JNI_OK) return;
   error = ti->GetClassSignature(declaring_class, &class_signature_ptr, nullptr);
   if (error != JNI_OK) return;
-  if (std::string(method_name_ptr) == "add") {
-    void *f = gen_function();
-    if (f)
-      *new_address_ptr = f;
-    else
-      *new_address_ptr = (void *)fortytwo;
-
-  }
-
-  if (class_signature_ptr != nullptr && method_name_ptr != nullptr)
   {
-    std::ofstream myfile;
-    myfile.open (LOG_PREFIX "bind_log.txt", std::ios::out | std::ios::app);
-    myfile << "Bind: class:" << class_signature_ptr << " method: " << method_name_ptr << "\n";
-    myfile.close();
+    void *f = gen_function(method_name_ptr, method_signature_ptr, address);
+    if (f) {
+      *new_address_ptr = f;
+    }
   }
 
   jni_env->DeleteLocalRef(declaring_class);
