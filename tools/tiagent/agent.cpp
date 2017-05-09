@@ -197,6 +197,8 @@ class Codegen {
 };
 
 void *gen_function(char* name, char *signature, void *func_ptr) {
+  static std::mutex g_mutex;
+  std::lock_guard<std::mutex> lock(g_mutex);
   static Codegen codegen;
   static int n = 0;
   char name_buffer[200];
