@@ -30,6 +30,8 @@
 #include <mutex>
 #include "jvmti.h"
 
+#include "common.h"
+
 #define LOG_PREFIX "/data/data/com.eugene.sum/"
 // #define LOG_PREFIX "/usr/local/google/home/ezemtsov/projects/j/"
 
@@ -74,14 +76,14 @@ class Codegen {
   }
 
   void *gen_transparent_wrapper(const char *name, char *signature, void *func_ptr) {
-    FunctionType *func_type = ParseJavaSignature(signature, 2);
+    FunctionType *func_type = GetFunctionType(signature, 2);
     if (func_type == nullptr) {
       return nullptr;
     }
 
     auto module = make_unique<Module>(std::string(name) + "_mod", *context_);
     auto M = module.get();
-    Function* wrap_ref = llvm::Function::Create(ParseJavaSignature("(L;)L;"),
+    Function* wrap_ref = llvm::Function::Create(GetFunctionType("(L;)L;"),
                                                 Function::ExternalLinkage,
                                                 "wrap_ref", M);
 
@@ -97,13 +99,16 @@ class Codegen {
     std::vector<Value *> values;
     for (auto arg : args) {
       if (arg->getType()->isPointerTy()) {
-        values.push_back(builder.CreateCall(wrap_ref, std::vector<Value *>{arg}));
+        values.push_back(builder.CreateCall(wrap_ref,
+                                            std::vector<Value *>{arg}));
       } else {
         values.push_back(arg);
       }
     }
 
-    Value* func_value = builder.CreateIntToPtr(builder.getInt64((uint64_t)func_ptr),func_type->getPointerTo());
+    Value* func_value = builder.CreateIntToPtr(
+                            builder.getInt64((uint64_t)func_ptr),
+                            func_type->getPointerTo());
     Value *ret = builder.CreateCall(func_value, values);
     builder.CreateRet(ret);
 
@@ -113,82 +118,11 @@ class Codegen {
   }
 
  private:
-  llvm::Type *GetPointerType() {
-    return Type::getVoidTy(*context_)->getPointerTo();
-  }
-
-  FunctionType *ParseJavaSignature(const char *str, int extraPtrArgs = 0) {
-    if (str == nullptr) return nullptr;
-    const char* ptr = str;
-    std::function<Type*()> consumeType =
-      [&ptr, &consumeType, this]()->Type * {
-      switch (*ptr) {
-        case 'Z':
-          ptr++;
-          return Type::getInt8Ty(*context_);
-        case 'B':
-          ptr++;
-          return Type::getInt8Ty(*context_);
-        case 'C':
-          ptr++;
-          return Type::getInt16Ty(*context_);
-        case 'S':
-          ptr++;
-          return Type::getInt16Ty(*context_);
-        case 'I':
-          ptr++;
-          return Type::getInt32Ty(*context_);
-        case 'J':
-          ptr++;
-          return Type::getInt64Ty(*context_);
-        case 'F':
-          ptr++;
-          return Type::getFloatTy(*context_);
-        case 'D':
-          ptr++;
-          return Type::getDoubleTy(*context_);
-        case 'V':
-          ptr++;
-          return Type::getVoidTy(*context_);
-        case 'L':
-          while (*ptr && *ptr != ';') ptr++;
-          if (*ptr == ';') {
-            ptr++;
-            return GetPointerType();
-          } else {
-            return nullptr;
-          }
-        case '[': {
-          ptr++;
-          if (consumeType())
-            return GetPointerType();
-          else
-            return nullptr;
-        }
-        default:
-          return nullptr;
-      };
-    };
-
-    if (*ptr != '(') return nullptr;
-    ptr++;
-    std::vector<Type*> args;
-    for (;extraPtrArgs > 0; --extraPtrArgs) {
-      args.push_back(GetPointerType());
-    }
-    Type *returnType;
-    while (*ptr && *ptr != ')') {
-      auto type = consumeType();
-      if (type == nullptr) return nullptr;
-      args.push_back(type);
-    }
-    if (*ptr != ')') return nullptr;
-    ptr++;
-    returnType = consumeType();
-    if (returnType == nullptr || *ptr) return nullptr;
-
-    return FunctionType::get(returnType, args, false);
-
+  FunctionType *GetFunctionType(const char *str, int extraPtrArgs = 0) {
+    llvm::Optional<MethodSignature> signature = ParseJavaSignature(str,
+                                                                extraPtrArgs);
+    if (!signature) return nullptr;
+    return ConvertSignatureToFunctionType(signature.getValue(), *context_);
   }
 
   std::unique_ptr<LLVMContext> context_;
@@ -206,6 +140,10 @@ void *gen_function(char* name, char *signature, void *func_ptr) {
   void *result = codegen.gen_transparent_wrapper(name_buffer, signature, func_ptr);
   if (result == nullptr) {
     print("codegen error");
+    print(name_buffer);
+    print(signature);
+  } else {
+    print("codegen OK");
     print(name_buffer);
     print(signature);
   }
@@ -279,5 +217,6 @@ Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
   error = ti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
   if (error != JNI_OK) return 1;
 
+  print("Agent initialized!");
   return 0;
 }
