@@ -45,6 +45,8 @@ JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) 
 typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
 
 void print(const char *str) {
+  static std::mutex g_mutex;
+  std::lock_guard<std::mutex> lock(g_mutex);
   std::ofstream myfile;
   myfile.open (LOG_PREFIX "debug_log.txt", std::ios::out | std::ios::app);
   myfile << str << "\n";
@@ -174,7 +176,9 @@ NativeMethodBind(jvmtiEnv *ti,
   error = ti->GetClassSignature(declaring_class, &class_signature_ptr, nullptr);
   if (error != JNI_OK) return;
   {
-    void *f = gen_function(method_name_ptr, method_signature_ptr, address);
+    void *f = nullptr;
+    if (std::string(method_name_ptr) == "add")
+      f = gen_function(method_name_ptr, method_signature_ptr, address);
     if (f) {
       *new_address_ptr = f;
     }
