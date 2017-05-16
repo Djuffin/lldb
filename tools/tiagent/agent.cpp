@@ -31,6 +31,7 @@
 #include "jvmti.h"
 
 #include "common.h"
+#include "jni_wrapper.h"
 
 #define LOG_PREFIX "/data/data/com.eugene.sum/"
 // #define LOG_PREFIX "/usr/local/google/home/ezemtsov/projects/j/"
@@ -43,7 +44,7 @@ JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) 
 
 typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
 
-void print(const char *str)  {
+void print(const char *str) {
   std::ofstream myfile;
   myfile.open (LOG_PREFIX "debug_log.txt", std::ios::out | std::ios::app);
   myfile << str << "\n";
@@ -52,10 +53,6 @@ void print(const char *str)  {
 
 int wrap_int(int x) {
   return x;
-}
-
-void* wrap_ref(void *ref) {
-  return ref;
 }
 
 class Codegen {
@@ -215,6 +212,9 @@ Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
   if (error != JNI_OK) return 1;
 
   error = ti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
+  if (error != JNI_OK) return 1;
+
+  error = RegisterNewJniTable(ti);
   if (error != JNI_OK) return 1;
 
   print("Agent initialized!");

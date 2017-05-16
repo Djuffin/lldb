@@ -1,3 +1,4 @@
+#pragma once
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
@@ -26,3 +27,5 @@ llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
 llvm::FunctionType *ConvertSignatureToFunctionType(
                                  const MethodSignature& signature,
                                  llvm::LLVMContext &context);
+
+void print(const char *str);

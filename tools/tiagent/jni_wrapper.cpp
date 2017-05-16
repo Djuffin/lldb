@@ -1,45 +1,253 @@
 #include "common.h"
 #include "jni.h"
-#if 0
+#include "jvmti.h"
+
 using namespace llvm;
 
-#define WRAP_UNWRAP_REF(ref_type) \
-ref_type unwrap_ref(ref_type ref) { return ref; } \
-ref_type wrap_ref(ref_type ref) { return ref; }
+static jniNativeInterface* old_native_table;
+static jniNativeInterface* new_native_table;
+static jvmtiEnv* ti;
 
-WRAP_UNWRAP_REF (jobject)
-WRAP_UNWRAP_REF (jclass)
-WRAP_UNWRAP_REF (jthrowable)
-WRAP_UNWRAP_REF (jstring)
-WRAP_UNWRAP_REF (jarray)
-WRAP_UNWRAP_REF (jbooleanArray)
-WRAP_UNWRAP_REF (jbyteArray)
-WRAP_UNWRAP_REF (jcharArray)
-WRAP_UNWRAP_REF (jshortArray)
-WRAP_UNWRAP_REF (jintArray)
-WRAP_UNWRAP_REF (jlongArray)
-WRAP_UNWRAP_REF (jfloatArray)
-WRAP_UNWRAP_REF (jdoubleArray)
-WRAP_UNWRAP_REF (jobjectArray)
+jobject unwrap_ref(jobject ref) {
+  return ref;
+}
+jobject wrap_ref(jobject ref) { return ref; }
 
-std::vector<const jvalue *> UnwrapAllArguments(jvmtiEnv *ti, JNIEnv* jni_env,
-                                            jmethodID methodID, va_list args) {
-  std::vector<const jvalue *> result;
+std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
+                                       va_list args) {
   char* method_name_ptr = nullptr;
   char* method_signature_ptr = nullptr;
-  ti->GetMethodName(method, &method_name_ptr, &method_signature_ptr, nullptr);
-
-
+  jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
+                                       &method_signature_ptr,
+                                       nullptr);
+  assert(error == JNI_OK);
+  auto signature = ParseJavaSignature(method_signature_ptr);
+  assert((bool)signature);
   ti->Deallocate((unsigned char *)method_name_ptr);
   ti->Deallocate((unsigned char *)method_signature_ptr);
+  std::vector<jvalue> result;
+  result.reserve(signature.getValue().arguments.size());
+  for (auto type : signature.getValue().arguments) {
+    jvalue value;
+    switch (type) {
+      case JavaType::jvoid:
+        assert(false);
+        break;
+      case JavaType::jboolean:
+        value.z = (jboolean)va_arg(args, int);
+        break;
+      case JavaType::jbyte:
+        value.b = (jbyte)va_arg(args, int);
+        break;
+      case JavaType::jchar:
+        value.c = (jchar)va_arg(args, int);
+        break;
+      case JavaType::jshort:
+        value.s = (jshort)va_arg(args, int);
+        break;
+      case JavaType::jint:
+        value.i = (jint)va_arg(args, int);
+        break;
+      case JavaType::jlong:
+        value.j = (jlong)va_arg(args, jlong);
+        break;
+      case JavaType::jfloat:
+        value.f = (jfloat)va_arg(args, double);
+        break;
+      case JavaType::jdouble:
+        value.d = (jdouble)va_arg(args, double);
+        break;
+      case JavaType::jobject:
+        value.l = va_arg(args, jobject);
+        value.l = unwrap_ref(value.l);
+        break;
+    }
+    result.push_back(value);
+  }
+  return result;
 }
 
-std::vector<const jvalue *> UnwrapAllArguments(jvmtiEnv *ti, JNIEnv* jni_env,
-                                        jmethodID methodID, const jvalue *) {
+std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
+                                       const jvalue *args) {
+  char* method_name_ptr = nullptr;
+  char* method_signature_ptr = nullptr;
+  jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
+                                       &method_signature_ptr,
+                                       nullptr);
+  assert(error == JNI_OK);
+  auto signature = ParseJavaSignature(method_signature_ptr);
+  assert((bool)signature);
+  ti->Deallocate((unsigned char *)method_name_ptr);
+  ti->Deallocate((unsigned char *)method_signature_ptr);
+  std::vector<jvalue> result;
+  result.reserve(signature.getValue().arguments.size());
+  const jvalue *arg = args;
+  for (auto type : signature.getValue().arguments) {
+    jvalue value;
+    switch (type) {
+      case JavaType::jvoid:
+        assert(false);
+        break;
+      case JavaType::jboolean:
+      case JavaType::jbyte:
+      case JavaType::jchar:
+      case JavaType::jshort:
+      case JavaType::jint:
+      case JavaType::jlong:
+      case JavaType::jfloat:
+      case JavaType::jdouble:
+        value = *arg;
+        break;
+      case JavaType::jobject:
+        value = *arg;
+        value.l = unwrap_ref(value.l);
+        break;
+    }
+    ++arg;
+    result.push_back(value);
+  }
+  return result;
+}
+
+
+#define STATIC_PRINTER() \
+  static int i = 0; if (i++ == 0) { print("called"); print(__FUNCTION__); }
+
+jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID, ...) {
+  STATIC_PRINTER()
+  va_list args;
+  va_start(args, methodID);
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
+  jobject result = old_native_table->NewObjectA(env,
+                      clazz, methodID, unwrapperdArgs.data());
+  va_end(args);
+  return result;
+}
+
+jobject W_NewObjectV(JNIEnv *env, jclass clazz, jmethodID methodID,
+                   va_list args) {
+  STATIC_PRINTER()
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
+  return old_native_table->NewObjectA(env,
+                    clazz, methodID, unwrapperdArgs.data());
+}
+jobject W_NewObjectA(JNIEnv *env, jclass clazz, jmethodID methodID,
+                   const jvalue *args) {
+  STATIC_PRINTER()
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
+  return old_native_table->NewObjectA(env,
+                    clazz, methodID, unwrapperdArgs.data());
+}
+
+
+#define DEFINE_CALL_WITH_TYPE(RetType, MethodName) \
+RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, ...) { \
+  STATIC_PRINTER() \
+  va_list args; \
+  RetType result; \
+  va_start(args,methodID); \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  result = old_native_table->MethodName##A(env, obj, methodID, \
+                                    unwrapperdArgs.data()); \
+  va_end(args); \
+  return WRAP(result); \
+} \
+RetType W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
+                            va_list args) { \
+  STATIC_PRINTER() \
+  RetType result; \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  result = old_native_table->MethodName##A(env, \
+                    obj, methodID, unwrapperdArgs.data()); \
+  return WRAP(result); \
+} \
+RetType W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
+                            const jvalue * args) { \
+  RetType result; \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  result = old_native_table->MethodName##A(env, \
+                    obj, methodID, unwrapperdArgs.data()); \
+  return WRAP(result); \
+}
+
+#define DEFINE_VOID_CALL(MethodName) \
+void W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, ...) { \
+  STATIC_PRINTER() \
+  va_list args; \
+  va_start(args,methodID); \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  old_native_table->MethodName##A(env, obj, methodID, \
+                                    unwrapperdArgs.data()); \
+  va_end(args); \
+} \
+void W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
+                            va_list args) { \
+  STATIC_PRINTER() \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  old_native_table->MethodName##A(env, \
+                    obj, methodID, unwrapperdArgs.data()); \
+} \
+void W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
+                            const jvalue * args) { \
+  STATIC_PRINTER() \
+  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
+  old_native_table->MethodName##A(env, \
+                    obj, methodID, unwrapperdArgs.data()); \
+}
+
+#define CALL(type, name) DEFINE_CALL_WITH_TYPE(type, Call##name##Method)
+#define WRAP(x) x
+#include "jni_calls.inc"
+#undef WRAP
+#define WRAP(x) wrap_ref(x)
+CALL(jobject, Object)
+DEFINE_VOID_CALL(CallVoidMethod)
+#undef CALL
+#undef WRAP
+
+void OverrideCallMethods(jniNativeInterface *jni_table) {
+#define CALL(type, name) \
+    jni_table->Call##name##Method = W_Call##name##Method; \
+    jni_table->Call##name##MethodA = W_Call##name##MethodA; \
+    jni_table->Call##name##MethodV = W_Call##name##MethodV;
+#define CALL_OBJECT() \
+    jni_table->CallObjectMethod = W_CallObjectMethod; \
+    jni_table->CallObjectMethodA = W_CallObjectMethodA; \
+    jni_table->CallObjectMethodV = W_CallObjectMethodV;
+
+#define CALL_VOID() \
+    jni_table->CallVoidMethod = W_CallVoidMethod; \
+    jni_table->CallVoidMethodA = W_CallVoidMethodA; \
+    jni_table->CallVoidMethodV = W_CallVoidMethodV;
+#include "jni_calls.inc"
+#undef CALL
+#undef CALL_OBJECT
+#undef CALL_OBJECT
 
 }
 
-struct JNIEnv2 {
+jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
+  ti = tiEnv;
+  if (ti == nullptr) return JVMTI_ERROR_INVALID_OBJECT;
+
+  jvmtiError error = ti->GetJNIFunctionTable(&old_native_table);
+  if(error != JNI_OK) return error;
+
+  error = ti->GetJNIFunctionTable(&new_native_table);
+  if(error != JNI_OK) return error;
+
+  new_native_table->NewObject = W_NewObject;
+  new_native_table->NewObjectA = W_NewObjectA;
+  new_native_table->NewObjectV = W_NewObjectV;
+  //OverrideCallMethods(new_native_table);
+  error = ti->SetJNIFunctionTable(new_native_table);
+  if(error != JNI_OK) return error;
+  return JVMTI_ERROR_NONE;
+}
+
+
+/*
+struct JNIEnv {
     const struct JNINativeInterface_ *functions;
 
     jint GetVersion() {
@@ -1117,4 +1325,4 @@ struct JNIEnv2 {
     }
 
 };
-#endif
+*/
