@@ -26,7 +26,7 @@ FunctionType *ConvertSignatureToFunctionType(const MethodSignature& signature,
         case JavaType::jdouble:
           return Type::getDoubleTy(context);
         case JavaType::jobject:
-          return Type::getVoidTy(context)->getPointerTo();
+          return Type::getInt8Ty(context)->getPointerTo();
       }
       return nullptr;
   };
