@@ -1,5 +1,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
@@ -25,6 +26,7 @@
 #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
@@ -59,6 +61,18 @@
 using namespace llvm;
 using namespace llvm::orc;
 
+
+static std::mutex g_print_mutex;
+template <class T>
+void print(const T &x) {
+  std::lock_guard<std::mutex> lock(g_print_mutex);
+  std::ofstream myfile;
+  std::error_code EC;
+  raw_fd_ostream file_stream(LOG_PREFIX "debug_log.txt", EC, sys::fs::F_Append);
+  file_stream << x << "\n";
+  file_stream.close();
+}
+
 bool IsDebuggerPresent()
 {
     char buf[1024];
@@ -92,18 +106,59 @@ JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) 
 
 typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
 
-void print(const char *str) {
-  static std::mutex g_mutex;
-  std::lock_guard<std::mutex> lock(g_mutex);
-  std::ofstream myfile;
-  myfile.open (LOG_PREFIX "debug_log.txt", std::ios::out | std::ios::app);
-  myfile << str << "\n";
-  myfile.close();
-}
+struct Allocation
+{
+  uint8_t *ptr;
+  uintptr_t size;
+};
 
-int wrap_int(int x) {
-  return x;
-}
+class SectionMemoryManagerWrapper : public SectionMemoryManager {
+  SectionMemoryManager &SM;
+  std::vector<Allocation> &Allocs;
+public:
+  SectionMemoryManagerWrapper(SectionMemoryManager &sm,
+                              std::vector<Allocation> &allocs) :
+      SM(sm), Allocs(allocs) {}
+  SectionMemoryManagerWrapper(const SectionMemoryManagerWrapper&) = delete;
+  void operator=(const SectionMemoryManagerWrapper&) = delete;
+  ~SectionMemoryManagerWrapper() override {}
+
+  uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID,
+                               StringRef SectionName) override {
+    auto result = SM.allocateCodeSection(Size, Alignment, SectionID, SectionName);
+    Allocs.push_back({result, Size});
+    return result;
+  }
+
+
+  uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
+                               unsigned SectionID, StringRef SectionName,
+                               bool isReadOnly) override {
+    print("allocate data");
+    print(Size);
+    return SM.allocateDataSection(Size, Alignment, SectionID, SectionName,
+                                  isReadOnly);
+
+  }
+
+  bool finalizeMemory(std::string *ErrMsg = nullptr) override {
+    print("binary code");
+
+    Allocation &last_alloc = Allocs.back();
+    ArrayRef<uint8_t> binary(last_alloc.ptr, last_alloc.size);
+    auto range = make_range(binary.begin(), binary.end());
+    std::string text = formatv("{0:@(x-2)}", range).str();
+    print(text);
+
+
+    return SM.finalizeMemory(ErrMsg);
+  }
+
+  void invalidateInstructionCache() override {
+    SM.invalidateInstructionCache();
+  }
+};
 
 class KaleidoscopeJIT {
 private:
@@ -111,13 +166,16 @@ private:
   const DataLayout DL;
   RTDyldObjectLinkingLayer<> ObjectLayer;
   IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
+  SectionMemoryManager RealMemoryManager;
+  std::vector<Allocation> Allocs;
 
 public:
   typedef decltype(CompileLayer)::ModuleSetHandleT ModuleHandle;
 
   KaleidoscopeJIT()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
-        CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
+        CompileLayer(ObjectLayer, SimpleCompiler(*TM))
+  {
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   }
 
@@ -141,15 +199,19 @@ public:
           return JITSymbol(nullptr);
         });
 
+    print(*M);
     // Build a singleton module set to hold our module.
     std::vector<std::unique_ptr<Module>> Ms;
     Ms.push_back(std::move(M));
 
+    auto MM = make_unique<SectionMemoryManagerWrapper>(RealMemoryManager,
+                                                       Allocs);
+
     // Add the set to the JIT with the resolver we created above and a newly
     // created SectionMemoryManager.
     return CompileLayer.addModuleSet(std::move(Ms),
-                                     make_unique<SectionMemoryManager>(),
-                                     std::move(Resolver));
+              std::move(MM),
+              std::move(Resolver));
   }
 
   JITSymbol findSymbol(const std::string Name) {
@@ -158,25 +220,26 @@ public:
     Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
     return CompileLayer.findSymbol(MangledNameStream.str(), true);
   }
-
-  void removeModule(ModuleHandle H) {
-    CompileLayer.removeModuleSet(H);
-  }
 };
 
+void *wrap_f_const(uint64_t x) {
+  uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
+  print("return address");
+  print(ret_addr);
+  return reinterpret_cast<void *>(x);
+}
 
 class Codegen {
  public:
   Codegen() {
-    llvm::sys::DynamicLibrary::AddSymbol("wrap_int", reinterpret_cast<void*>(wrap_int));
     llvm::sys::DynamicLibrary::AddSymbol("wrap_ref", reinterpret_cast<void*>(wrap_ref));
-    llvm::sys::DynamicLibrary::AddSymbol("print", reinterpret_cast<void*>(print));
+    llvm::sys::DynamicLibrary::AddSymbol("print", reinterpret_cast<void*>(print<char *>));
+    llvm::sys::DynamicLibrary::AddSymbol("wrap_f_const", reinterpret_cast<void*>(wrap_f_const));
     InitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
     context_ = make_unique<LLVMContext>();
     jit_ = make_unique<KaleidoscopeJIT>();
-
   }
 
   void *gen_transparent_wrapper(const char *name, char *signature, void *func_ptr) {
@@ -191,9 +254,12 @@ class Codegen {
     Function* wrap_ref = llvm::Function::Create(GetFunctionType("(L;)L;"),
                                                 Function::ExternalLinkage,
                                                 "wrap_ref", M);
-    Function* print = llvm::Function::Create(GetFunctionType("(L;)V"),
-                                                Function::ExternalLinkage,
-                                                "print", M);
+    Function* wrap_f_const = llvm::Function::Create(
+        FunctionType::get(func_type->getPointerTo(),
+                          std::vector<Type*> { Type::getInt64Ty(*context_) },
+                          false),
+                          Function::ExternalLinkage,
+                          "wrap_f_const", M);
 
     Function *F = cast<Function>(M->getOrInsertFunction(name, func_type));
     BasicBlock *BB = BasicBlock::Create(*context_, "", F);
@@ -214,16 +280,22 @@ class Codegen {
       }
     }
 
-    // GlobalVariable * header_const = builder.CreateGlobalString("function called");
-    // builder.CreateCall(print, std::vector<Value *>{header_const});
-    // GlobalVariable * name_const = builder.CreateGlobalString(name);
-    // builder.CreateCall(print, std::vector<Value *>{name_const});
+    GlobalVariable * header_const = builder.CreateGlobalString("function called");
 
-    Value* func_value = builder.CreateIntToPtr(
-                            builder.getInt64((uint64_t)func_ptr),
-                            func_type->getPointerTo());
+
+    Value* func_address = builder.getInt64((int64_t)func_ptr);
+    Value* func_value = builder.CreateCall(wrap_f_const,
+                std::vector<Value *> { func_address });
+
+    // Value* func_value = builder.CreateIntToPtr(
+    //                         builder.getInt64((uint64_t)func_ptr),
+    //                         func_type->getPointerTo());
     Value *ret = builder.CreateCall(func_value, values);
-    builder.CreateRet(ret);
+    if (func_type->getReturnType()->isVoidTy()) {
+      builder.CreateRetVoid();
+    } else {
+      builder.CreateRet(ret);
+    }
 
     jit_->addModule(std::move(module));
     auto func_symbol = jit_->findSymbol(name);
@@ -293,8 +365,8 @@ NativeMethodBind(jvmtiEnv *ti,
   if (error != JNI_OK) return;
   {
     void *f = nullptr;
-    print("NativeMethodBind");
-    print(method_name_ptr);
+    //print("NativeMethodBind");
+    //print(method_name_ptr);
     //if (std::string(method_name_ptr) == "add")
       f = gen_function(method_name_ptr, method_signature_ptr, address);
     if (f) {

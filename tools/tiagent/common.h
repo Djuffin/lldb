@@ -28,4 +28,10 @@ llvm::FunctionType *ConvertSignatureToFunctionType(
                                  const MethodSignature& signature,
                                  llvm::LLVMContext &context);
 
-void print(const char *str);
+
+template <class T>
+void print(const T &x);
+
+inline void print(const char *x) {
+    print(std::string(x));
+}
