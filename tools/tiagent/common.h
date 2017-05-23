@@ -1,25 +1,31 @@
 #pragma once
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 
-enum class JavaType {
-    jvoid,
-    jboolean,
-    jbyte,
-    jchar,
-    jshort,
-    jint,
-    jlong,
-    jfloat,
-    jdouble,
-    jobject
+enum class JavaType : uint8_t {
+  jvoid,
+  jboolean,
+  jbyte,
+  jchar,
+  jshort,
+  jint,
+  jlong,
+  jfloat,
+  jdouble,
+  jobject
 };
 
 struct MethodSignature {
-    std::vector<JavaType> arguments;
-    JavaType return_type;
+  llvm::SmallVector<JavaType, 5> arguments;
+  JavaType return_type;
 };
+
+bool operator ==(const MethodSignature &a, const MethodSignature &b);
+
+llvm::SmallString<8> SignatureToShortString(const MethodSignature &sig);
 
 llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
                                                    int extraPtrArgs = 0);
@@ -33,5 +39,5 @@ template <class T>
 void print(const T &x);
 
 inline void print(const char *x) {
-    print(std::string(x));
+  print(std::string(x));
 }

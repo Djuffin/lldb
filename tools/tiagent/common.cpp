@@ -2,6 +2,53 @@
 
 using namespace llvm;
 
+bool operator ==(const MethodSignature &a, const MethodSignature &b) {
+  if (a.return_type != b.return_type)
+    return false;
+  if (a.arguments.size() != b.arguments.size())
+    return false;
+  int arg_size = (int)a.arguments.size();
+  for (int i = 0; i < arg_size; ++i)
+    if (a.arguments[i] != b.arguments[i])
+      return false;
+  return true;
+}
+
+SmallString<8> SignatureToShortString(const MethodSignature &sig) {
+  auto get_type_char = [](JavaType type) -> char {
+    switch (type) {
+      case JavaType::jvoid:
+        return 'V';
+      case JavaType::jboolean:
+        return 'Z';
+      case JavaType::jbyte:
+        return 'B';
+      case JavaType::jchar:
+        return 'C';
+      case JavaType::jshort:
+        return 'S';
+      case JavaType::jint:
+        return 'I';
+      case JavaType::jlong:
+        return 'J';
+      case JavaType::jfloat:
+        return 'F';
+      case JavaType::jdouble:
+        return 'D';
+      case JavaType::jobject:
+        return 'L';
+    }
+    return 0;
+  };
+
+  SmallString<8> result;
+  result.append(1, get_type_char(sig.return_type));
+  for (auto type : sig.arguments) {
+    result.append(1, get_type_char(type));
+  }
+  result.append(1, '\0');
+  return result;
+}
 
 FunctionType *ConvertSignatureToFunctionType(const MethodSignature& signature,
                                  llvm::LLVMContext &context) {
