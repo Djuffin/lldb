@@ -450,7 +450,7 @@ Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
   //   sleep(0);
   // }
 
-  //error = RegisterNewJniTable(ti);
+  error = RegisterNewJniTable(ti);
   if (error != JNI_OK) return 1;
 
   print("Agent initialized!");
