@@ -67,7 +67,6 @@ static std::mutex g_print_mutex;
 template <class T>
 void print(const T &x) {
   std::lock_guard<std::mutex> lock(g_print_mutex);
-  std::ofstream myfile;
   std::error_code EC;
   raw_fd_ostream file_stream(LOG_PREFIX "debug_log.txt", EC, sys::fs::F_Append);
   file_stream << x << "\n";
@@ -135,8 +134,8 @@ public:
   uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
                                unsigned SectionID, StringRef SectionName,
                                bool isReadOnly) override {
-    print("There should be no data allocations");
-    return SM.allocateDataSection(Size, Alignment, SectionID, SectionName, isReadOnly);
+    return SM.allocateDataSection(Size, Alignment, SectionID,
+                                  SectionName, isReadOnly);
   }
 
   bool finalizeMemory(std::string *ErrMsg = nullptr) override {
@@ -246,13 +245,16 @@ class Codegen {
     if (func_type == nullptr) {
       return nullptr;
     }
+    auto short_sig_str = SignatureToShortString(sig);
     std::string name("stub_");
-    name += SignatureToShortString(sig).data();
+    name += short_sig_str.data();
 
     auto module = make_unique<Module>("Module_" + name, *context_);
     auto M = module.get();
     M->setDataLayout(jit_->getTargetMachine().createDataLayout());
-    auto ptr_to_ptr_func_type = GetFunctionType("(L;)L;");
+    auto ptr_to_ptr_func_type = FunctionType::get(
+        Type::getInt8Ty(*context_)->getPointerTo(),
+        { Type::getInt8Ty(*context_)->getPointerTo() }, false);
     Function* wrap_ref = llvm::Function::Create(ptr_to_ptr_func_type,
                                                 Function::ExternalLinkage,
                                                 "wrap_ref", M);
@@ -279,8 +281,7 @@ class Codegen {
     std::vector<Value *> values;
     for (auto arg : args) {
       if (arg->getType()->isPointerTy()) {
-        values.push_back(builder.CreateCall(wrap_ref,
-                                            {arg}));
+        values.push_back(builder.CreateCall(wrap_ref, { arg }));
       } else {
         values.push_back(arg);
       }
@@ -298,9 +299,8 @@ class Codegen {
     }
 
     auto MM = make_unique<SectionMemoryManagerWrapper>(memory_manager_,
-        [this, sig](Codeblock blk) {
-          auto sig_str = SignatureToShortString(sig);
-          signature_to_code_.insert({sig_str, blk});
+        [this, short_sig_str](Codeblock blk) {
+          signature_to_code_.insert({short_sig_str, blk});
         });
     jit_->addModule(std::move(module), std::move(MM));
     auto func_symbol = jit_->findSymbol(name);
@@ -349,13 +349,6 @@ class Codegen {
   }
 
  private:
-  FunctionType *GetFunctionType(const char *str, int extraPtrArgs = 0) {
-    llvm::Optional<MethodSignature> signature = ParseJavaSignature(str,
-                                                                extraPtrArgs);
-    if (!signature) return nullptr;
-    return ConvertSignatureToFunctionType(signature.getValue(), *context_);
-  }
-
   std::unique_ptr<LLVMContext> context_;
   std::unique_ptr<KaleidoscopeJIT> jit_;
   StringMap<Codeblock> signature_to_code_;
