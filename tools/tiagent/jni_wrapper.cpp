@@ -532,6 +532,306 @@ jfieldID W_FromReflectedField(JNIEnv *env, jobject field) {
   return old_native_table->FromReflectedField(env, field);
 }
 
+jobject W_ToReflectedMethod(JNIEnv *env, jclass cls, jmethodID methodID, jboolean isStatic) {
+  STATIC_PRINTER()
+  cls = unwrap_ref(cls);
+  auto result = old_native_table->ToReflectedMethod(env, cls, methodID, isStatic);
+  result = wrap_ref(result);
+  return result;
+}
+
+jobject W_ToReflectedField(JNIEnv *env, jclass cls, jfieldID fieldID, jboolean isStatic) {
+  STATIC_PRINTER()
+  cls = unwrap_ref(cls);
+  auto result = old_native_table->ToReflectedField(env,cls,fieldID,isStatic);
+  result = wrap_ref(result);
+  return result;
+}
+
+jmethodID W_GetMethodID(JNIEnv *env, jclass clazz, const char *name,
+                    const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetMethodID(env,clazz,name,sig);
+}
+
+jfieldID W_GetFieldID(JNIEnv *env, jclass clazz, const char *name,
+                  const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetFieldID(env,clazz,name,sig);
+}
+
+jmethodID W_GetStaticMethodID(JNIEnv *env, jclass clazz, const char *name,
+                          const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetStaticMethodID(env,clazz,name,sig);
+}
+
+jfieldID W_GetStaticFieldID(JNIEnv *env, jclass clazz, const char *name,
+                        const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetStaticFieldID(env,clazz,name,sig);
+}
+
+jclass W_GetSuperclass(JNIEnv *env, jclass sub) {
+  STATIC_PRINTER()
+  sub = unwrap_ref(sub);
+  auto result = old_native_table->GetSuperclass(env, sub);
+  result = wrap_ref(result);
+  return result;
+}
+
+jboolean W_IsAssignableFrom(JNIEnv *env, jclass sub, jclass sup) {
+  STATIC_PRINTER()
+  sub = unwrap_ref(sub);
+  sup = unwrap_ref(sup);
+  return old_native_table->IsAssignableFrom(env, sub, sup);
+}
+
+jboolean W_IsSameObject(JNIEnv *env, jobject obj1, jobject obj2) {
+  STATIC_PRINTER();
+  obj1 = unwrap_ref(obj1);
+  obj2 = unwrap_ref(obj2);
+  return old_native_table->IsSameObject(env, obj1, obj2);
+}
+
+jobject W_AllocObject(JNIEnv *env, jclass clazz) {
+  STATIC_PRINTER();
+  clazz = unwrap_ref(clazz);
+  auto result = old_native_table->AllocObject(env,clazz);
+  return wrap_ref(result);
+}
+
+jclass W_GetObjectClass(JNIEnv *env, jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  auto result = old_native_table->GetObjectClass(env,obj);
+  return wrap_ref(result);
+}
+
+jboolean W_IsInstanceOf(JNIEnv *env, jobject obj, jclass clazz) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  clazz = unwrap_ref(clazz);
+  return old_native_table->IsInstanceOf(env,obj,clazz);
+}
+
+jobjectArray W_NewObjectArray(JNIEnv *env, jsize len, jclass clazz,
+                            jobject init) {
+  STATIC_PRINTER();
+  clazz = unwrap_ref(clazz);
+  init = unwrap_ref(init);
+  auto result = old_native_table->NewObjectArray(env, len, clazz, init);
+  return wrap_ref(result);
+}
+
+jobject W_GetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index) {
+  STATIC_PRINTER();
+  array = unwrap_ref(array);
+  auto result = old_native_table->GetObjectArrayElement(env, array, index);
+  return wrap_ref(result);
+}
+
+void W_SetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index,
+                           jobject val) {
+  STATIC_PRINTER();
+  array = unwrap_ref(array);
+  val = unwrap_ref(val);
+  old_native_table->SetObjectArrayElement(env, array, index, val);
+}
+
+jint W_Throw(JNIEnv *env, jthrowable obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  return old_native_table->Throw(env, obj);
+}
+
+jint W_ThrowNew(JNIEnv *env, jclass clazz, const char *msg) {
+  STATIC_PRINTER();
+  clazz = unwrap_ref(clazz);
+  return old_native_table->ThrowNew(env, clazz, msg);
+}
+
+jthrowable W_ExceptionOccurred(JNIEnv *env) {
+  STATIC_PRINTER();
+  auto result = old_native_table->ExceptionOccurred(env);
+  return result;
+}
+
+jint W_PushLocalFrame(JNIEnv *env, jint capacity) {
+  STATIC_PRINTER();
+  return old_native_table->PushLocalFrame(env,capacity);
+}
+
+jobject W_PopLocalFrame(JNIEnv *env, jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  auto result = old_native_table->PopLocalFrame(env, obj);
+  return wrap_ref(result);
+}
+
+jobject W_NewGlobalRef(JNIEnv *env, jobject lobj) {
+  STATIC_PRINTER();
+  lobj = unwrap_ref(lobj);
+  auto result = old_native_table->NewGlobalRef(env,lobj);
+  return wrap_ref(result);
+}
+
+void W_DeleteGlobalRef(JNIEnv *env, jobject gref) {
+  STATIC_PRINTER();
+  gref = unwrap_ref(gref);
+  old_native_table->DeleteGlobalRef(env,gref);
+}
+
+void W_DeleteLocalRef(JNIEnv *env, jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  old_native_table->DeleteLocalRef(env, obj);
+}
+
+jobject W_NewLocalRef(JNIEnv *env, jobject ref) {
+  STATIC_PRINTER();
+  ref = unwrap_ref(ref);
+  auto result = old_native_table->NewLocalRef(env,ref);
+  return wrap_ref(result);
+}
+
+jstring W_NewString(JNIEnv *env,const jchar *unicode, jsize len) {
+  STATIC_PRINTER();
+  auto result = old_native_table->NewString(env,unicode,len);
+  return wrap_ref(result);
+}
+jsize W_GetStringLength(JNIEnv *env,jstring str) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  return old_native_table->GetStringLength(env,str);
+}
+const jchar *W_GetStringChars(JNIEnv *env,jstring str, jboolean *isCopy) {
+  str = unwrap_ref(str);
+  return old_native_table->GetStringChars(env,str,isCopy);
+}
+void W_ReleaseStringChars(JNIEnv *env,jstring str, const jchar *chars) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  old_native_table->ReleaseStringChars(env,str,chars);
+}
+
+jstring W_NewStringUTF(JNIEnv *env,const char *utf) {
+  STATIC_PRINTER();
+  auto result = old_native_table->NewStringUTF(env,utf);
+  return wrap_ref(result);
+}
+jsize W_GetStringUTFLength(JNIEnv *env,jstring str) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  return old_native_table->GetStringUTFLength(env,str);
+}
+const char* W_GetStringUTFChars(JNIEnv *env,jstring str, jboolean *isCopy) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  return old_native_table->GetStringUTFChars(env,str,isCopy);
+}
+void W_ReleaseStringUTFChars(JNIEnv *env,jstring str, const char* chars) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  old_native_table->ReleaseStringUTFChars(env,str,chars);
+}
+
+jsize W_GetArrayLength(JNIEnv *env,jarray array) {
+  STATIC_PRINTER();
+  array = unwrap_ref(array);
+  return old_native_table->GetArrayLength(env,array);
+}
+jint W_RegisterNatives(JNIEnv *env,jclass clazz, const JNINativeMethod *methods,
+                       jint nMethods) {
+  STATIC_PRINTER();
+  clazz = unwrap_ref(clazz);
+  return old_native_table->RegisterNatives(env,clazz,methods,nMethods);
+}
+jint W_UnregisterNatives(JNIEnv *env,jclass clazz) {
+  STATIC_PRINTER();
+  clazz = unwrap_ref(clazz);
+  return old_native_table->UnregisterNatives(env,clazz);
+}
+
+jint W_MonitorEnter(JNIEnv *env,jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  return old_native_table->MonitorEnter(env,obj);
+}
+jint W_MonitorExit(JNIEnv *env,jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  return old_native_table->MonitorExit(env,obj);
+}
+
+void W_GetStringRegion(JNIEnv *env,jstring str, jsize start, jsize len, jchar *buf) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  old_native_table->GetStringRegion(env,str,start,len,buf);
+}
+void W_GetStringUTFRegion(JNIEnv *env,jstring str, jsize start, jsize len, char *buf) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  old_native_table->GetStringUTFRegion(env,str,start,len,buf);
+}
+
+void * W_GetPrimitiveArrayCritical(JNIEnv *env,jarray array, jboolean *isCopy) {
+  STATIC_PRINTER();
+  array = unwrap_ref(array);
+  return old_native_table->GetPrimitiveArrayCritical(env,array,isCopy);
+}
+void W_ReleasePrimitiveArrayCritical(JNIEnv *env,jarray array, void *carray, jint mode) {
+  STATIC_PRINTER();
+  array = unwrap_ref(array);
+  old_native_table->ReleasePrimitiveArrayCritical(env,array,carray,mode);
+}
+
+const jchar * W_GetStringCritical(JNIEnv *env,jstring str, jboolean *isCopy) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  return old_native_table->GetStringCritical(env,str,isCopy);
+}
+void W_ReleaseStringCritical(JNIEnv *env,jstring str, const jchar *cstring) {
+  STATIC_PRINTER();
+  str = unwrap_ref(str);
+  old_native_table->ReleaseStringCritical(env,str,cstring);
+}
+
+jweak W_NewWeakGlobalRef(JNIEnv *env,jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  return old_native_table->NewWeakGlobalRef(env,obj);
+}
+void W_DeleteWeakGlobalRef(JNIEnv *env,jweak ref) {
+  STATIC_PRINTER();
+  old_native_table->DeleteWeakGlobalRef(env,ref);
+}
+
+jobject W_NewDirectByteBuffer(JNIEnv *env,void* address, jlong capacity) {
+  STATIC_PRINTER();
+  auto result = old_native_table->NewDirectByteBuffer(env, address, capacity);
+  return wrap_ref(result);
+}
+void* W_GetDirectBufferAddress(JNIEnv *env, jobject buf) {
+  STATIC_PRINTER();
+  buf = unwrap_ref(buf);
+  return old_native_table->GetDirectBufferAddress(env, buf);
+}
+jlong W_GetDirectBufferCapacity(JNIEnv *env,jobject buf) {
+  STATIC_PRINTER();
+  buf = unwrap_ref(buf);
+  return old_native_table->GetDirectBufferCapacity(env, buf);
+}
+jobjectRefType W_GetObjectRefType(JNIEnv *env,jobject obj) {
+  STATIC_PRINTER();
+  obj = unwrap_ref(obj);
+  return old_native_table->GetObjectRefType(env, obj);
+}
+
 jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
   ti = tiEnv;
   if (ti == nullptr) return JVMTI_ERROR_INVALID_OBJECT;
@@ -549,6 +849,54 @@ jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
   new_native_table->FindClass = W_FindClass;
   new_native_table->FromReflectedMethod = W_FromReflectedMethod;
   new_native_table->FromReflectedField = W_FromReflectedField;
+  new_native_table->ToReflectedMethod = W_ToReflectedMethod;
+  new_native_table->ToReflectedField = W_ToReflectedField;
+  new_native_table->GetMethodID = W_GetMethodID;
+  new_native_table->GetFieldID = W_GetFieldID;
+  new_native_table->GetStaticMethodID = W_GetStaticMethodID;
+  new_native_table->GetStaticFieldID = W_GetStaticFieldID;
+  new_native_table->GetSuperclass = W_GetSuperclass;
+  new_native_table->IsAssignableFrom = W_IsAssignableFrom;
+  new_native_table->IsSameObject = W_IsSameObject;
+  new_native_table->AllocObject = W_AllocObject;
+  new_native_table->GetObjectClass = W_GetObjectClass;
+  new_native_table->IsInstanceOf = W_IsInstanceOf;
+  new_native_table->NewObjectArray = W_NewObjectArray;
+  new_native_table->GetObjectArrayElement = W_GetObjectArrayElement;
+  new_native_table->SetObjectArrayElement = W_SetObjectArrayElement;
+  new_native_table->Throw = W_Throw;
+  new_native_table->ThrowNew = W_ThrowNew;
+  new_native_table->ExceptionOccurred = W_ExceptionOccurred;
+  new_native_table->PushLocalFrame = W_PushLocalFrame;
+  new_native_table->PopLocalFrame = W_PopLocalFrame;
+  new_native_table->DeleteGlobalRef = W_DeleteGlobalRef;
+  new_native_table->NewGlobalRef = W_NewGlobalRef;
+  new_native_table->DeleteLocalRef = W_DeleteLocalRef;
+  new_native_table->NewLocalRef = W_NewLocalRef;
+  new_native_table->NewString = W_NewString;
+  new_native_table->GetStringLength = W_GetStringLength;
+  new_native_table->ReleaseStringChars = W_ReleaseStringChars;
+  new_native_table->NewStringUTF = W_NewStringUTF;
+  new_native_table->GetStringUTFLength = W_GetStringUTFLength;
+  new_native_table->GetStringUTFChars = W_GetStringUTFChars;
+  new_native_table->ReleaseStringUTFChars = W_ReleaseStringUTFChars;
+  new_native_table->GetArrayLength = W_GetArrayLength;
+  new_native_table->RegisterNatives = W_RegisterNatives;
+  new_native_table->UnregisterNatives = W_UnregisterNatives;
+  new_native_table->MonitorEnter = W_MonitorEnter;
+  new_native_table->MonitorExit = W_MonitorExit;
+  new_native_table->GetStringRegion = W_GetStringRegion;
+  new_native_table->GetStringUTFRegion = W_GetStringUTFRegion;
+  new_native_table->GetPrimitiveArrayCritical = W_GetPrimitiveArrayCritical;
+  new_native_table->ReleasePrimitiveArrayCritical = W_ReleasePrimitiveArrayCritical;
+  new_native_table->GetStringCritical = W_GetStringCritical;
+  new_native_table->ReleaseStringCritical = W_ReleaseStringCritical;
+  new_native_table->NewWeakGlobalRef = W_NewWeakGlobalRef;
+  new_native_table->DeleteWeakGlobalRef = W_DeleteWeakGlobalRef;
+  new_native_table->NewDirectByteBuffer = W_NewDirectByteBuffer;
+  new_native_table->GetDirectBufferAddress = W_GetDirectBufferAddress;
+  new_native_table->GetDirectBufferCapacity = W_GetDirectBufferCapacity;
+  new_native_table->GetObjectRefType = W_GetObjectRefType;
 
   OverrideCallMethods(new_native_table);
   error = ti->SetJNIFunctionTable(new_native_table);
@@ -557,213 +905,3 @@ jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
 }
 
 
-/*
-struct JNIEnv {
-    const struct JNINativeInterface_ *functions;
-
-    jfieldID FromReflectedField(jobject field) {
-        return functions->FromReflectedField(this,field);
-    }
-
-    jobject ToReflectedMethod(jclass cls, jmethodID methodID, jboolean isStatic) {
-        return functions->ToReflectedMethod(this, cls, methodID, isStatic);
-    }
-
-    jclass GetSuperclass(jclass sub) {
-        return functions->GetSuperclass(this, sub);
-    }
-    jboolean IsAssignableFrom(jclass sub, jclass sup) {
-        return functions->IsAssignableFrom(this, sub, sup);
-    }
-
-    jobject ToReflectedField(jclass cls, jfieldID fieldID, jboolean isStatic) {
-        return functions->ToReflectedField(this,cls,fieldID,isStatic);
-    }
-
-    jint Throw(jthrowable obj) {
-        return functions->Throw(this, obj);
-    }
-    jint ThrowNew(jclass clazz, const char *msg) {
-        return functions->ThrowNew(this, clazz, msg);
-    }
-    jthrowable ExceptionOccurred() {
-        return functions->ExceptionOccurred(this);
-    }
-    void ExceptionDescribe() {
-        functions->ExceptionDescribe(this);
-    }
-    void ExceptionClear() {
-        functions->ExceptionClear(this);
-    }
-    void FatalError(const char *msg) {
-        functions->FatalError(this, msg);
-    }
-
-    jint PushLocalFrame(jint capacity) {
-        return functions->PushLocalFrame(this,capacity);
-    }
-    jobject PopLocalFrame(jobject result) {
-        return functions->PopLocalFrame(this,result);
-    }
-
-    jobject NewGlobalRef(jobject lobj) {
-        return functions->NewGlobalRef(this,lobj);
-    }
-    void DeleteGlobalRef(jobject gref) {
-        functions->DeleteGlobalRef(this,gref);
-    }
-    void DeleteLocalRef(jobject obj) {
-        functions->DeleteLocalRef(this, obj);
-    }
-
-    jboolean IsSameObject(jobject obj1, jobject obj2) {
-        return functions->IsSameObject(this,obj1,obj2);
-    }
-
-    jobject NewLocalRef(jobject ref) {
-        return functions->NewLocalRef(this,ref);
-    }
-    jint EnsureLocalCapacity(jint capacity) {
-        return functions->EnsureLocalCapacity(this,capacity);
-    }
-
-    jobject AllocObject(jclass clazz) {
-        return functions->AllocObject(this,clazz);
-    }
-
-    jclass GetObjectClass(jobject obj) {
-        return functions->GetObjectClass(this,obj);
-    }
-    jboolean IsInstanceOf(jobject obj, jclass clazz) {
-        return functions->IsInstanceOf(this,obj,clazz);
-    }
-
-    jmethodID GetMethodID(jclass clazz, const char *name,
-                          const char *sig) {
-        return functions->GetMethodID(this,clazz,name,sig);
-    }
-
-
-    jfieldID GetFieldID(jclass clazz, const char *name,
-                        const char *sig) {
-        return functions->GetFieldID(this,clazz,name,sig);
-    }
-
-    jmethodID GetStaticMethodID(jclass clazz, const char *name,
-                                const char *sig) {
-        return functions->GetStaticMethodID(this,clazz,name,sig);
-    }
-
-    jfieldID GetStaticFieldID(jclass clazz, const char *name,
-                              const char *sig) {
-        return functions->GetStaticFieldID(this,clazz,name,sig);
-    }
-
-    jstring NewString(const jchar *unicode, jsize len) {
-        return functions->NewString(this,unicode,len);
-    }
-    jsize GetStringLength(jstring str) {
-        return functions->GetStringLength(this,str);
-    }
-    const jchar *GetStringChars(jstring str, jboolean *isCopy) {
-        return functions->GetStringChars(this,str,isCopy);
-    }
-    void ReleaseStringChars(jstring str, const jchar *chars) {
-        functions->ReleaseStringChars(this,str,chars);
-    }
-
-    jstring NewStringUTF(const char *utf) {
-        return functions->NewStringUTF(this,utf);
-    }
-    jsize GetStringUTFLength(jstring str) {
-        return functions->GetStringUTFLength(this,str);
-    }
-    const char* GetStringUTFChars(jstring str, jboolean *isCopy) {
-        return functions->GetStringUTFChars(this,str,isCopy);
-    }
-    void ReleaseStringUTFChars(jstring str, const char* chars) {
-        functions->ReleaseStringUTFChars(this,str,chars);
-    }
-
-    jsize GetArrayLength(jarray array) {
-        return functions->GetArrayLength(this,array);
-    }
-
-    jobjectArray NewObjectArray(jsize len, jclass clazz,
-                                jobject init) {
-        return functions->NewObjectArray(this,len,clazz,init);
-    }
-    jobject GetObjectArrayElement(jobjectArray array, jsize index) {
-        return functions->GetObjectArrayElement(this,array,index);
-    }
-    void SetObjectArrayElement(jobjectArray array, jsize index,
-                               jobject val) {
-        functions->SetObjectArrayElement(this,array,index,val);
-    }
-
-    jint RegisterNatives(jclass clazz, const JNINativeMethod *methods,
-                         jint nMethods) {
-        return functions->RegisterNatives(this,clazz,methods,nMethods);
-    }
-    jint UnregisterNatives(jclass clazz) {
-        return functions->UnregisterNatives(this,clazz);
-    }
-
-    jint MonitorEnter(jobject obj) {
-        return functions->MonitorEnter(this,obj);
-    }
-    jint MonitorExit(jobject obj) {
-        return functions->MonitorExit(this,obj);
-    }
-
-    jint GetJavaVM(JavaVM **vm) {
-        return functions->GetJavaVM(this,vm);
-    }
-
-    void GetStringRegion(jstring str, jsize start, jsize len, jchar *buf) {
-        functions->GetStringRegion(this,str,start,len,buf);
-    }
-    void GetStringUTFRegion(jstring str, jsize start, jsize len, char *buf) {
-        functions->GetStringUTFRegion(this,str,start,len,buf);
-    }
-
-    void * GetPrimitiveArrayCritical(jarray array, jboolean *isCopy) {
-        return functions->GetPrimitiveArrayCritical(this,array,isCopy);
-    }
-    void ReleasePrimitiveArrayCritical(jarray array, void *carray, jint mode) {
-        functions->ReleasePrimitiveArrayCritical(this,array,carray,mode);
-    }
-
-    const jchar * GetStringCritical(jstring string, jboolean *isCopy) {
-        return functions->GetStringCritical(this,string,isCopy);
-    }
-    void ReleaseStringCritical(jstring string, const jchar *cstring) {
-        functions->ReleaseStringCritical(this,string,cstring);
-    }
-
-    jweak NewWeakGlobalRef(jobject obj) {
-        return functions->NewWeakGlobalRef(this,obj);
-    }
-    void DeleteWeakGlobalRef(jweak ref) {
-        functions->DeleteWeakGlobalRef(this,ref);
-    }
-
-    jboolean ExceptionCheck() {
-        return functions->ExceptionCheck(this);
-    }
-
-    jobject NewDirectByteBuffer(void* address, jlong capacity) {
-        return functions->NewDirectByteBuffer(this, address, capacity);
-    }
-    void* GetDirectBufferAddress(jobject buf) {
-        return functions->GetDirectBufferAddress(this, buf);
-    }
-    jlong GetDirectBufferCapacity(jobject buf) {
-        return functions->GetDirectBufferCapacity(this, buf);
-    }
-    jobjectRefType GetObjectRefType(jobject obj) {
-        return functions->GetObjectRefType(this, obj);
-    }
-
-};
-*/
