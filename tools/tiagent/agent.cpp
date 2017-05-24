@@ -327,9 +327,6 @@ public:
   }
 
   JITSymbol findSymbol(const std::string &name) {
-    // std::string MangledName;
-    // raw_string_ostream MangledNameStream(MangledName);
-    // Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
     return CompileLayer.findSymbol(name, true);
   }
 };
