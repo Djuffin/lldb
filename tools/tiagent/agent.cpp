@@ -1,7 +1,5 @@
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/IntervalMap.h"
-#include "llvm/Support/DynamicLibrary.h"
-#include "llvm/Support/FormatVariadic.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
@@ -18,19 +16,21 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/ExecutionEngine/Orc/CompileOnDemandLayer.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
-#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
+#include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
@@ -39,24 +39,22 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 
-#include <jni.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string>
-#include <fstream>
-#include <mutex>
 #include "jvmti.h"
-
-#include <sys/stat.h>
-#include <string.h>
 #include <fcntl.h>
+#include <fstream>
+#include <jni.h>
+#include <mutex>
+#include <stdio.h>
+#include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <fcntl.h>
+#include <string.h>
+#include <sys/stat.h>
 
 #include "agent.h"
 #include "jni_wrapper.h"
-
-
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -64,26 +62,26 @@ using namespace llvm::orc;
 SmallString<8> SignatureToShortString(const MethodSignature &sig) {
   auto get_type_char = [](JavaType type) -> char {
     switch (type) {
-      case JavaType::jvoid:
-        return 'V';
-      case JavaType::jboolean:
-        return 'Z';
-      case JavaType::jbyte:
-        return 'B';
-      case JavaType::jchar:
-        return 'C';
-      case JavaType::jshort:
-        return 'S';
-      case JavaType::jint:
-        return 'I';
-      case JavaType::jlong:
-        return 'J';
-      case JavaType::jfloat:
-        return 'F';
-      case JavaType::jdouble:
-        return 'D';
-      case JavaType::jobject:
-        return 'L';
+    case JavaType::jvoid:
+      return 'V';
+    case JavaType::jboolean:
+      return 'Z';
+    case JavaType::jbyte:
+      return 'B';
+    case JavaType::jchar:
+      return 'C';
+    case JavaType::jshort:
+      return 'S';
+    case JavaType::jint:
+      return 'I';
+    case JavaType::jlong:
+      return 'J';
+    case JavaType::jfloat:
+      return 'F';
+    case JavaType::jdouble:
+      return 'D';
+    case JavaType::jobject:
+      return 'L';
     }
     return 0;
   };
@@ -97,35 +95,35 @@ SmallString<8> SignatureToShortString(const MethodSignature &sig) {
   return result;
 }
 
-FunctionType *ConvertSignatureToFunctionType(const MethodSignature& signature,
-                                 llvm::LLVMContext &context) {
-  auto convert_type = [&context] (JavaType type) -> Type * {
-      switch (type) {
-        case JavaType::jvoid:
-          return Type::getVoidTy(context);
-        case JavaType::jboolean:
-          return Type::getInt8Ty(context);
-        case JavaType::jbyte:
-          return Type::getInt8Ty(context);
-        case JavaType::jchar:
-          return Type::getInt16Ty(context);
-        case JavaType::jshort:
-          return Type::getInt16Ty(context);
-        case JavaType::jint:
-          return Type::getInt32Ty(context);
-        case JavaType::jlong:
-          return Type::getInt64Ty(context);
-        case JavaType::jfloat:
-          return Type::getFloatTy(context);
-        case JavaType::jdouble:
-          return Type::getDoubleTy(context);
-        case JavaType::jobject:
-          return Type::getInt8Ty(context)->getPointerTo();
-      }
-      return nullptr;
+FunctionType *ConvertSignatureToFunctionType(const MethodSignature &signature,
+                                             llvm::LLVMContext &context) {
+  auto convert_type = [&context](JavaType type) -> Type * {
+    switch (type) {
+    case JavaType::jvoid:
+      return Type::getVoidTy(context);
+    case JavaType::jboolean:
+      return Type::getInt8Ty(context);
+    case JavaType::jbyte:
+      return Type::getInt8Ty(context);
+    case JavaType::jchar:
+      return Type::getInt16Ty(context);
+    case JavaType::jshort:
+      return Type::getInt16Ty(context);
+    case JavaType::jint:
+      return Type::getInt32Ty(context);
+    case JavaType::jlong:
+      return Type::getInt64Ty(context);
+    case JavaType::jfloat:
+      return Type::getFloatTy(context);
+    case JavaType::jdouble:
+      return Type::getDoubleTy(context);
+    case JavaType::jobject:
+      return Type::getInt8Ty(context)->getPointerTo();
+    }
+    return nullptr;
   };
 
-  std::vector<Type*> args;
+  std::vector<Type *> args;
   for (auto type : signature.arguments) {
     args.push_back(convert_type(type));
   }
@@ -135,83 +133,88 @@ FunctionType *ConvertSignatureToFunctionType(const MethodSignature& signature,
 
 llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
                                                    int extraPtrArgs) {
-    if (str == nullptr) return None;
-    const char* ptr = str;
-    std::function<Optional<JavaType>()> consumeType =
-      [&ptr, &consumeType]()->Optional<JavaType> {
-      switch (*ptr) {
-        case 'V':
-          ptr++;
-          return JavaType::jvoid;
-        case 'Z':
-          ptr++;
-          return JavaType::jboolean;
-        case 'B':
-          ptr++;
-          return JavaType::jbyte;
-        case 'C':
-          ptr++;
-          return JavaType::jchar;
-        case 'S':
-          ptr++;
-          return JavaType::jshort;
-        case 'I':
-          ptr++;
-          return JavaType::jint;
-        case 'J':
-          ptr++;
-          return JavaType::jlong;
-        case 'F':
-          ptr++;
-          return JavaType::jfloat;
-        case 'D':
-          ptr++;
-          return JavaType::jdouble;
-        case 'L':
-          while (*ptr && *ptr != ';') ptr++;
-          if (*ptr == ';') {
-            ptr++;
-            return JavaType::jobject;
-          } else {
-            return None;
-          }
-        case '[': {
-          ptr++;
-          if (consumeType())
-            return JavaType::jobject;
-          else
-            return None;
-        }
-        default:
-          return None;
-      };
+  if (str == nullptr)
+    return None;
+  const char *ptr = str;
+  std::function<Optional<JavaType>()> consumeType =
+      [&ptr, &consumeType]() -> Optional<JavaType> {
+    switch (*ptr) {
+    case 'V':
+      ptr++;
+      return JavaType::jvoid;
+    case 'Z':
+      ptr++;
+      return JavaType::jboolean;
+    case 'B':
+      ptr++;
+      return JavaType::jbyte;
+    case 'C':
+      ptr++;
+      return JavaType::jchar;
+    case 'S':
+      ptr++;
+      return JavaType::jshort;
+    case 'I':
+      ptr++;
+      return JavaType::jint;
+    case 'J':
+      ptr++;
+      return JavaType::jlong;
+    case 'F':
+      ptr++;
+      return JavaType::jfloat;
+    case 'D':
+      ptr++;
+      return JavaType::jdouble;
+    case 'L':
+      while (*ptr && *ptr != ';')
+        ptr++;
+      if (*ptr == ';') {
+        ptr++;
+        return JavaType::jobject;
+      } else {
+        return None;
+      }
+    case '[': {
+      ptr++;
+      if (consumeType())
+        return JavaType::jobject;
+      else
+        return None;
+    }
+    default:
+      return None;
     };
+  };
 
-    MethodSignature result;
-    if (*ptr != '(') return None;
-    ptr++;
-    for (;extraPtrArgs > 0; --extraPtrArgs) {
-      result.arguments.push_back(JavaType::jobject);
-    }
+  MethodSignature result;
+  if (*ptr != '(')
+    return None;
+  ptr++;
+  for (; extraPtrArgs > 0; --extraPtrArgs) {
+    result.arguments.push_back(JavaType::jobject);
+  }
 
-    while (*ptr && *ptr != ')') {
-      auto type = consumeType();
-      if (!type) return None;
-      result.arguments.push_back(type.getValue());
-    }
-    if (*ptr != ')') return None;
-    ptr++;
-    Optional<JavaType> returnType = consumeType();
-    if (!returnType || *ptr) return None;
+  while (*ptr && *ptr != ')') {
+    auto type = consumeType();
+    if (!type)
+      return None;
+    result.arguments.push_back(type.getValue());
+  }
+  if (*ptr != ')')
+    return None;
+  ptr++;
+  Optional<JavaType> returnType = consumeType();
+  if (!returnType || *ptr)
+    return None;
 
-    result.return_type = returnType.getValue();
-    return result;
+  result.return_type = returnType.getValue();
+  return result;
 };
 
 #define LOG_PREFIX "/data/data/com.eugene.sum/"
 static std::mutex g_print_mutex;
-template <class T>
-void print(const T &x) {
+template <class T> void print(const T &x) {
   std::lock_guard<std::mutex> lock(g_print_mutex);
   std::error_code EC;
   raw_fd_ostream file_stream(LOG_PREFIX "debug_log.txt", EC, sys::fs::F_Append);
@@ -219,34 +222,32 @@ void print(const T &x) {
   file_stream.close();
 }
 
-template void print<int>(const int&);
-template void print<uint64_t>(const uint64_t&);
+template void print<int>(const int &);
+template void print<uint64_t>(const uint64_t &);
 
-bool IsDebuggerPresent()
-{
-    char buf[1024];
-    bool debugger_present = false;
+bool IsDebuggerPresent() {
+  char buf[1024];
+  bool debugger_present = false;
 
-    int status_fd = open("/proc/self/status", O_RDONLY);
-    if (status_fd == -1)
-        return 0;
+  int status_fd = open("/proc/self/status", O_RDONLY);
+  if (status_fd == -1)
+    return 0;
 
-    int num_read = read(status_fd, buf, sizeof(buf));
+  int num_read = read(status_fd, buf, sizeof(buf));
 
-    if (num_read > 0)
-    {
-        static const char TracerPid[] = "TracerPid:";
-        char *tracer_pid;
+  if (num_read > 0) {
+    static const char TracerPid[] = "TracerPid:";
+    char *tracer_pid;
 
-        buf[num_read] = 0;
-        tracer_pid    = strstr(buf, TracerPid);
-        if (tracer_pid)
-            debugger_present = (atoi(tracer_pid + sizeof(TracerPid) - 1) != 0);
-    }
-    close(status_fd);
-    print(buf);
+    buf[num_read] = 0;
+    tracer_pid = strstr(buf, TracerPid);
+    if (tracer_pid)
+      debugger_present = (atoi(tracer_pid + sizeof(TracerPid) - 1) != 0);
+  }
+  close(status_fd);
+  print(buf);
 
-    return debugger_present;
+  return debugger_present;
 }
 
 typedef ArrayRef<uint8_t> Codeblock;
@@ -257,27 +258,27 @@ class SectionMemoryManagerWrapper : public SectionMemoryManager {
 
 public:
   SectionMemoryManagerWrapper(SectionMemoryManager &sm,
-                              std::function<void(Codeblock)> report) :
-      SM(sm), report_alloc_(std::move(report)) {}
+                              std::function<void(Codeblock)> report)
+      : SM(sm), report_alloc_(std::move(report)) {}
 
-  SectionMemoryManagerWrapper(const SectionMemoryManagerWrapper&) = delete;
-  void operator=(const SectionMemoryManagerWrapper&) = delete;
+  SectionMemoryManagerWrapper(const SectionMemoryManagerWrapper &) = delete;
+  void operator=(const SectionMemoryManagerWrapper &) = delete;
   ~SectionMemoryManagerWrapper() override {}
 
   uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
                                unsigned SectionID,
                                StringRef SectionName) override {
-    auto result = SM.allocateCodeSection(Size, Alignment, SectionID, SectionName);
+    auto result =
+        SM.allocateCodeSection(Size, Alignment, SectionID, SectionName);
     report_alloc_(Codeblock(result, Size));
     return result;
   }
 
-
   uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
                                unsigned SectionID, StringRef SectionName,
                                bool isReadOnly) override {
-    return SM.allocateDataSection(Size, Alignment, SectionID,
-                                  SectionName, isReadOnly);
+    return SM.allocateDataSection(Size, Alignment, SectionID, SectionName,
+                                  isReadOnly);
   }
 
   bool finalizeMemory(std::string *ErrMsg = nullptr) override {
@@ -299,8 +300,7 @@ private:
 public:
   LlvmJit()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
-        CompileLayer(ObjectLayer, SimpleCompiler(*TM))
-  {}
+        CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {}
 
   TargetMachine &getTargetMachine() { return *TM; }
 
@@ -314,7 +314,7 @@ public:
         },
         [](const std::string &Name) {
           if (auto SymAddr =
-                RTDyldMemoryManager::getSymbolAddressInProcess(Name))
+                  RTDyldMemoryManager::getSymbolAddressInProcess(Name))
             return JITSymbol(SymAddr, JITSymbolFlags::Exported);
           return JITSymbol(nullptr);
         });
@@ -322,9 +322,8 @@ public:
     std::vector<std::unique_ptr<Module>> Ms;
     Ms.push_back(std::move(M));
 
-    CompileLayer.addModuleSet(std::move(Ms),
-              std::move(MM),
-              std::move(Resolver));
+    CompileLayer.addModuleSet(std::move(Ms), std::move(MM),
+                              std::move(Resolver));
   }
 
   JITSymbol findSymbol(const std::string &name) {
@@ -354,23 +353,27 @@ void *lookup_native_func() {
 
 void register_native_func(Codeblock block, void *native_func) {
   std::lock_guard<std::mutex> lock(g_codetree_mutex);
-  g_ret_pc_range_to_native_func->insert(
-    (uint64_t)block.data(),
-    ((uint64_t)block.data()) + block.size(),
-    (uint64_t)native_func);
+  g_ret_pc_range_to_native_func->insert((uint64_t)block.data(),
+                                        ((uint64_t)block.data()) + block.size(),
+                                        (uint64_t)native_func);
 }
 
 class Codegen {
- public:
+public:
   Codegen() {
-    g_ret_pc_range_to_native_func = new IntervalMap<uint64_t, uint64_t> (allocator_);
+    g_ret_pc_range_to_native_func =
+        new IntervalMap<uint64_t, uint64_t>(allocator_);
     g_ret_pc_to_native_func = new DenseMap<uint64_t, uint64_t>(10000);
 
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
-    llvm::sys::DynamicLibrary::AddSymbol("wrap_ref", reinterpret_cast<void*>(wrap_raw_ref));
-    llvm::sys::DynamicLibrary::AddSymbol("unwrap_ref", reinterpret_cast<void*>(unwrap_raw_ref));
-    llvm::sys::DynamicLibrary::AddSymbol("print", reinterpret_cast<void*>(print<char *>));
-    llvm::sys::DynamicLibrary::AddSymbol("lookup_native_func", reinterpret_cast<void*>(lookup_native_func));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "wrap_ref", reinterpret_cast<void *>(wrap_raw_ref));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "unwrap_ref", reinterpret_cast<void *>(unwrap_raw_ref));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "print", reinterpret_cast<void *>(print<char *>));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "lookup_native_func", reinterpret_cast<void *>(lookup_native_func));
     InitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
@@ -390,22 +393,18 @@ class Codegen {
     auto module = make_unique<Module>("Module_" + name, *context_);
     auto M = module.get();
     M->setDataLayout(jit_->getTargetMachine().createDataLayout());
-    auto ptr_to_ptr_func_type = FunctionType::get(
-        Type::getInt8Ty(*context_)->getPointerTo(),
-        { Type::getInt8Ty(*context_)->getPointerTo() }, false);
-    Function* wrap_ref = llvm::Function::Create(ptr_to_ptr_func_type,
-                                                Function::ExternalLinkage,
-                                                "wrap_ref", M);
+    auto ptr_to_ptr_func_type =
+        FunctionType::get(Type::getInt8Ty(*context_)->getPointerTo(),
+                          {Type::getInt8Ty(*context_)->getPointerTo()}, false);
+    Function *wrap_ref = llvm::Function::Create(
+        ptr_to_ptr_func_type, Function::ExternalLinkage, "wrap_ref", M);
 
+    Function *unwrap_ref = llvm::Function::Create(
+        ptr_to_ptr_func_type, Function::ExternalLinkage, "unwrap_ref", M);
 
-    Function* unwrap_ref = llvm::Function::Create(ptr_to_ptr_func_type,
-                                                Function::ExternalLinkage,
-                                                "unwrap_ref", M);
-
-    Function* lookup_native_func = llvm::Function::Create(
-        FunctionType::get(func_type->getPointerTo(), { }, false),
-                          Function::ExternalLinkage,
-                          "lookup_native_func", M);
+    Function *lookup_native_func = llvm::Function::Create(
+        FunctionType::get(func_type->getPointerTo(), {}, false),
+        Function::ExternalLinkage, "lookup_native_func", M);
 
     Function *F = cast<Function>(M->getOrInsertFunction(name, func_type));
     BasicBlock *BB = BasicBlock::Create(*context_, "", F);
@@ -419,36 +418,35 @@ class Codegen {
     std::vector<Value *> values;
     for (auto arg : args) {
       if (arg->getType()->isPointerTy()) {
-        values.push_back(builder.CreateCall(wrap_ref, { arg }));
+        values.push_back(builder.CreateCall(wrap_ref, {arg}));
       } else {
         values.push_back(arg);
       }
     }
 
-    Value* func_value = builder.CreateCall(lookup_native_func, {});
+    Value *func_value = builder.CreateCall(lookup_native_func, {});
     Value *ret = builder.CreateCall(func_value, values);
     if (func_type->getReturnType()->isVoidTy()) {
       builder.CreateRetVoid();
-    } else if ( func_type->getReturnType()->isPointerTy()) {
-      ret = builder.CreateCall(unwrap_ref, { ret });
+    } else if (func_type->getReturnType()->isPointerTy()) {
+      ret = builder.CreateCall(unwrap_ref, {ret});
       builder.CreateRet(ret);
     } else {
       builder.CreateRet(ret);
     }
 
-    auto MM = make_unique<SectionMemoryManagerWrapper>(memory_manager_,
-        [this, short_sig_str](Codeblock blk) {
+    auto MM = make_unique<SectionMemoryManagerWrapper>(
+        memory_manager_, [this, short_sig_str](Codeblock blk) {
           signature_to_code_.insert({short_sig_str, blk});
         });
     jit_->addModule(std::move(module), std::move(MM));
     auto func_symbol = jit_->findSymbol(name);
-    void *result = (void*)func_symbol.getAddress();
+    void *result = (void *)func_symbol.getAddress();
 
     return result;
   }
 
-  void *get_transparent_wrapper(const char *name,
-                                char *signature,
+  void *get_transparent_wrapper(const char *name, char *signature,
                                 void *func_ptr) {
     auto parsed_sig = ParseJavaSignature(signature, 2);
     if (!parsed_sig) {
@@ -466,7 +464,8 @@ class Codegen {
     if (prototype_block.size() == 0) {
       return nullptr;
     }
-    if (sym_address != nullptr && sym_address != (void *)prototype_block.data()) {
+    if (sym_address != nullptr &&
+        sym_address != (void *)prototype_block.data()) {
       print("ERROR: non-0 offset function start");
       print(name);
       print(signature);
@@ -475,7 +474,7 @@ class Codegen {
     }
 
     uint8_t *new_block_mem = memory_manager_.allocateCodeSection(
-                                  prototype_block.size(), 16, 1, ".text");
+        prototype_block.size(), 16, 1, ".text");
 
     memcpy(new_block_mem, prototype_block.data(), prototype_block.size());
     memory_manager_.finalizeMemory();
@@ -486,7 +485,7 @@ class Codegen {
     return (void *)new_block_mem;
   }
 
- private:
+private:
   std::unique_ptr<LLVMContext> context_;
   std::unique_ptr<LlvmJit> jit_;
   StringMap<Codeblock> signature_to_code_;
@@ -495,7 +494,7 @@ class Codegen {
   IntervalMap<uint64_t, uint64_t>::Allocator allocator_;
 };
 
-void *gen_function(char* name, char *signature, void *func_ptr) {
+void *gen_function(char *name, char *signature, void *func_ptr) {
   static std::mutex g_mutex;
   std::lock_guard<std::mutex> lock(g_mutex);
   static Codegen codegen;
@@ -512,32 +511,30 @@ void *gen_function(char* name, char *signature, void *func_ptr) {
   return result;
 }
 
-
-jvmtiEnv* CreateJvmtiEnv(JavaVM* vm) {
-  jvmtiEnv* jvmti_env;
-  jint result = vm->GetEnv((void**)&jvmti_env, JVMTI_VERSION_1_2);
+jvmtiEnv *CreateJvmtiEnv(JavaVM *vm) {
+  jvmtiEnv *jvmti_env;
+  jint result = vm->GetEnv((void **)&jvmti_env, JVMTI_VERSION_1_2);
   if (result != JNI_OK) {
     return nullptr;
   }
   return jvmti_env;
 }
 
-void JNICALL
-NativeMethodBind(jvmtiEnv *ti,
-            JNIEnv* jni_env,
-            jthread thread,
-            jmethodID method,
-            void* address,
-            void** new_address_ptr) {
-  char* method_name_ptr = nullptr;
-  char* method_signature_ptr = nullptr;
-  char* class_signature_ptr = nullptr;
+void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
+                              jmethodID method, void *address,
+                              void **new_address_ptr) {
+  char *method_name_ptr = nullptr;
+  char *method_signature_ptr = nullptr;
+  char *class_signature_ptr = nullptr;
   jclass declaring_class = nullptr;
-  jvmtiError error = ti->GetMethodName(method, &method_name_ptr, &method_signature_ptr, nullptr);
+  jvmtiError error = ti->GetMethodName(method, &method_name_ptr,
+                                       &method_signature_ptr, nullptr);
   error = ti->GetMethodDeclaringClass(method, &declaring_class);
-  if (error != JNI_OK) return;
+  if (error != JNI_OK)
+    return;
   error = ti->GetClassSignature(declaring_class, &class_signature_ptr, nullptr);
-  if (error != JNI_OK) return;
+  if (error != JNI_OK)
+    return;
   {
     void *f = gen_function(method_name_ptr, method_signature_ptr, address);
     if (f) {
@@ -551,41 +548,46 @@ NativeMethodBind(jvmtiEnv *ti,
   ti->Deallocate((unsigned char *)class_signature_ptr);
 }
 
-JNIEXPORT jint JNICALL
-Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
+JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
   return Agent_OnAttach(vm, options, reserved);
 }
 
-JNIEXPORT jint JNICALL
-Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
+JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options,
+                                      void *reserved) {
   jvmtiError error;
 
-  jvmtiEnv* ti = CreateJvmtiEnv(vm);
-  if (ti == nullptr) return 1;
+  jvmtiEnv *ti = CreateJvmtiEnv(vm);
+  if (ti == nullptr)
+    return 1;
 
   // Hook up event callbacks
   jvmtiEventCallbacks callbacks = {};
   callbacks.NativeMethodBind = &NativeMethodBind;
   error = ti->SetEventCallbacks(&callbacks, sizeof(callbacks));
-  if (error != JNI_OK) return 1;
+  if (error != JNI_OK)
+    return 1;
 
   jvmtiCapabilities caps;
   error = ti->GetPotentialCapabilities(&caps);
-  if (error != JNI_OK) return 1;
+  if (error != JNI_OK)
+    return 1;
 
   error = ti->AddCapabilities(&caps);
-  if (error != JNI_OK) return 1;
+  if (error != JNI_OK)
+    return 1;
 
-  error = ti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
-  if (error != JNI_OK) return 1;
-
+  error = ti->SetEventNotificationMode(JVMTI_ENABLE,
+                                       JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
+  if (error != JNI_OK)
+    return 1;
 
   // while (!IsDebuggerPresent()) {
   //   sleep(0);
   // }
 
   error = RegisterNewJniTable(ti);
-  if (error != JNI_OK) return 1;
+  if (error != JNI_OK)
+    return 1;
 
   print("Agent initialized!");
   return 0;

@@ -1,38 +1,37 @@
-#include "agent.h"
 #include "jni_wrapper.h"
+#include "agent.h"
 
 using namespace llvm;
 
-static jniNativeInterface* old_native_table;
-static jniNativeInterface* new_native_table;
-static jvmtiEnv* ti;
+static jniNativeInterface *old_native_table;
+static jniNativeInterface *new_native_table;
+static jvmtiEnv *ti;
 
 constexpr uint64_t ref_mask = 0; //(1ull << 62);
 
-void* unwrap_raw_ref(void* ref) {
+void *unwrap_raw_ref(void *ref) {
   uint64_t x = (uint64_t)ref;
   x ^= ref_mask;
   return (void *)x;
 }
-void* wrap_raw_ref(void* ref) {
+void *wrap_raw_ref(void *ref) {
   uint64_t x = (uint64_t)ref;
   x ^= ref_mask;
   return (void *)x;
 }
 
-#define ASSERT(x) if (!(x)) { \
-  print("ASSERT FAIL");\
-  print(#x); \
-  print(__FUNCTION__);\
-}
+#define ASSERT(x)                                                              \
+  if (!(x)) {                                                                  \
+    print("ASSERT FAIL");                                                      \
+    print(#x);                                                                 \
+    print(__FUNCTION__);                                                       \
+  }
 
-std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
-                                       va_list args) {
-  char* method_name_ptr = nullptr;
-  char* method_signature_ptr = nullptr;
+std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, va_list args) {
+  char *method_name_ptr = nullptr;
+  char *method_signature_ptr = nullptr;
   jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
-                                       &method_signature_ptr,
-                                       nullptr);
+                                       &method_signature_ptr, nullptr);
   ASSERT(error == JNI_OK);
   auto signature = ParseJavaSignature(method_signature_ptr);
   ASSERT((bool)signature);
@@ -43,50 +42,48 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
   for (auto type : signature.getValue().arguments) {
     jvalue value;
     switch (type) {
-      case JavaType::jvoid:
-        ASSERT(false);
-        break;
-      case JavaType::jboolean:
-        value.z = (jboolean)va_arg(args, int);
-        break;
-      case JavaType::jbyte:
-        value.b = (jbyte)va_arg(args, int);
-        break;
-      case JavaType::jchar:
-        value.c = (jchar)va_arg(args, int);
-        break;
-      case JavaType::jshort:
-        value.s = (jshort)va_arg(args, int);
-        break;
-      case JavaType::jint:
-        value.i = (jint)va_arg(args, int);
-        break;
-      case JavaType::jlong:
-        value.j = (jlong)va_arg(args, jlong);
-        break;
-      case JavaType::jfloat:
-        value.f = (jfloat)va_arg(args, double);
-        break;
-      case JavaType::jdouble:
-        value.d = (jdouble)va_arg(args, double);
-        break;
-      case JavaType::jobject:
-        value.l = va_arg(args, jobject);
-        value.l = unwrap_ref(value.l);
-        break;
+    case JavaType::jvoid:
+      ASSERT(false);
+      break;
+    case JavaType::jboolean:
+      value.z = (jboolean)va_arg(args, int);
+      break;
+    case JavaType::jbyte:
+      value.b = (jbyte)va_arg(args, int);
+      break;
+    case JavaType::jchar:
+      value.c = (jchar)va_arg(args, int);
+      break;
+    case JavaType::jshort:
+      value.s = (jshort)va_arg(args, int);
+      break;
+    case JavaType::jint:
+      value.i = (jint)va_arg(args, int);
+      break;
+    case JavaType::jlong:
+      value.j = (jlong)va_arg(args, jlong);
+      break;
+    case JavaType::jfloat:
+      value.f = (jfloat)va_arg(args, double);
+      break;
+    case JavaType::jdouble:
+      value.d = (jdouble)va_arg(args, double);
+      break;
+    case JavaType::jobject:
+      value.l = va_arg(args, jobject);
+      value.l = unwrap_ref(value.l);
+      break;
     }
     result.push_back(value);
   }
   return result;
 }
 
-std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
-                                       const jvalue *args) {
-  char* method_name_ptr = nullptr;
-  char* method_signature_ptr = nullptr;
+std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
+  char *method_name_ptr = nullptr;
+  char *method_signature_ptr = nullptr;
   jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
-                                       &method_signature_ptr,
-                                       nullptr);
+                                       &method_signature_ptr, nullptr);
   ASSERT(error == JNI_OK);
   auto signature = ParseJavaSignature(method_signature_ptr);
   ASSERT((bool)signature);
@@ -98,23 +95,23 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
   for (auto type : signature.getValue().arguments) {
     jvalue value;
     switch (type) {
-      case JavaType::jvoid:
-        ASSERT(false);
-        break;
-      case JavaType::jboolean:
-      case JavaType::jbyte:
-      case JavaType::jchar:
-      case JavaType::jshort:
-      case JavaType::jint:
-      case JavaType::jlong:
-      case JavaType::jfloat:
-      case JavaType::jdouble:
-        value = *arg;
-        break;
-      case JavaType::jobject:
-        value = *arg;
-        value.l = unwrap_ref(value.l);
-        break;
+    case JavaType::jvoid:
+      ASSERT(false);
+      break;
+    case JavaType::jboolean:
+    case JavaType::jbyte:
+    case JavaType::jchar:
+    case JavaType::jshort:
+    case JavaType::jint:
+    case JavaType::jlong:
+    case JavaType::jfloat:
+    case JavaType::jdouble:
+      value = *arg;
+      break;
+    case JavaType::jobject:
+      value = *arg;
+      value.l = unwrap_ref(value.l);
+      break;
     }
     ++arg;
     result.push_back(value);
@@ -122,289 +119,299 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
   return result;
 }
 
+#define STATIC_PRINTER()                                                       \
+  static int i = 0;                                                            \
+  if (i++ < 100) {                                                             \
+    print(__FUNCTION__);                                                       \
+  }
 
-#define STATIC_PRINTER() \
-  static int i = 0; if (i++ < 100) { print(__FUNCTION__); }
+#define DEFINE_CALL_WITH_TYPE(RetType, MethodName)                             \
+  JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, \
+                                 ...) {                                        \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    va_list args;                                                              \
+    RetType result;                                                            \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
+    va_end(args);                                                              \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj,                  \
+                                    jmethodID methodID, va_list args) {        \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj,                  \
+                                    jmethodID methodID, const jvalue *args) {  \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }
 
-#define DEFINE_CALL_WITH_TYPE(RetType, MethodName) \
-JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  va_list args; \
-  RetType result; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, obj, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    obj, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    obj, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-}
+#define DEFINE_VOID_CALL(MethodName)                                           \
+  JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID,    \
+                              ...) {                                           \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    va_list args;                                                              \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
+    va_end(args);                                                              \
+  }                                                                            \
+  JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
+                                 va_list args) {                               \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
+  }                                                                            \
+  JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
+                                 const jvalue *args) {                         \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
+  }
 
-#define DEFINE_VOID_CALL(MethodName) \
-JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  va_list args; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, obj, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-} \
-JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    obj, methodID, unwrapperdArgs.data()); \
-} \
-JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    obj, methodID, unwrapperdArgs.data()); \
-}
+#define DEFINE_NONVIRT_CALL_WITH_TYPE(RetType, MethodName)                     \
+  JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,       \
+                                 jmethodID methodID, ...) {                    \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    va_list args;                                                              \
+    RetType result;                                                            \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
+    va_end(args);                                                              \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,    \
+                                    jmethodID methodID, va_list args) {        \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,    \
+                                    jmethodID methodID, const jvalue *args) {  \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }
 
+#define DEFINE_NONVIRT_VOID_CALL(MethodName)                                   \
+  JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,          \
+                              jmethodID methodID, ...) {                       \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    va_list args;                                                              \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
+    va_end(args);                                                              \
+  }                                                                            \
+  JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,       \
+                                 jmethodID methodID, va_list args) {           \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
+  }                                                                            \
+  JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,       \
+                                 jmethodID methodID, const jvalue *args) {     \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    clazz = unwrap_ref(clazz);                                                 \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
+  }
 
-#define DEFINE_NONVIRT_CALL_WITH_TYPE(RetType, MethodName) \
-JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  va_list args; \
-  RetType result; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, obj, clazz, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    obj, clazz, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    obj, clazz, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-}
+#define DEFINE_STATIC_CALL_WITH_TYPE(RetType, MethodName)                      \
+  JNICALL RetType W_##MethodName(JNIEnv *env, jclass clazz,                    \
+                                 jmethodID methodID, ...) {                    \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    va_list args;                                                              \
+    RetType result;                                                            \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
+    va_end(args);                                                              \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##V(JNIEnv *env, jclass clazz,                 \
+                                    jmethodID methodID, va_list args) {        \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }                                                                            \
+  JNICALL RetType W_##MethodName##A(JNIEnv *env, jclass clazz,                 \
+                                    jmethodID methodID, const jvalue *args) {  \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    RetType result;                                                            \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
+    return WRAP(result);                                                       \
+  }
 
-#define DEFINE_NONVIRT_VOID_CALL(MethodName) \
-JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  va_list args; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, obj, clazz, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-} \
-JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    obj, clazz, methodID, unwrapperdArgs.data()); \
-} \
-JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  clazz = unwrap_ref(clazz); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    obj, clazz, methodID, unwrapperdArgs.data()); \
-}
+#define DEFINE_STATIC_VOID_CALL(MethodName)                                    \
+  JNICALL void W_##MethodName(JNIEnv *env, jclass clazz, jmethodID methodID,   \
+                              ...) {                                           \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    va_list args;                                                              \
+    va_start(args, methodID);                                                  \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
+    va_end(args);                                                              \
+  }                                                                            \
+  JNICALL void W_##MethodName##V(JNIEnv *env, jclass clazz,                    \
+                                 jmethodID methodID, va_list args) {           \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
+  }                                                                            \
+  JNICALL void W_##MethodName##A(JNIEnv *env, jclass clazz,                    \
+                                 jmethodID methodID, const jvalue *args) {     \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
+  }
 
-#define DEFINE_STATIC_CALL_WITH_TYPE(RetType, MethodName) \
-JNICALL RetType W_##MethodName(JNIEnv *env, jclass clazz, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  va_list args; \
-  RetType result; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, clazz, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##V(JNIEnv *env, jclass clazz, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    clazz, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-} \
-JNICALL RetType W_##MethodName##A(JNIEnv *env, jclass clazz, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  RetType result; \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  result = old_native_table->MethodName##A(env, \
-                    clazz, methodID, unwrapperdArgs.data()); \
-  return WRAP(result); \
-}
+#define DEFINE_FIELD_GETTER(FieldType, TypeName)                               \
+  FieldType W_Get##TypeName##Field(JNIEnv *env, jobject obj,                   \
+                                   jfieldID fieldID) {                         \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    FieldType result;                                                          \
+    result = old_native_table->Get##TypeName##Field(env, obj, fieldID);        \
+    return WRAP(result);                                                       \
+  }
 
-#define DEFINE_STATIC_VOID_CALL(MethodName) \
-JNICALL void W_##MethodName(JNIEnv *env, jclass clazz, jmethodID methodID, ...) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  va_list args; \
-  va_start(args,methodID); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, clazz, methodID, \
-                                    unwrapperdArgs.data()); \
-  va_end(args); \
-} \
-JNICALL void W_##MethodName##V(JNIEnv *env, jclass clazz, jmethodID methodID, \
-                            va_list args) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    clazz, methodID, unwrapperdArgs.data()); \
-} \
-JNICALL void W_##MethodName##A(JNIEnv *env, jclass clazz, jmethodID methodID, \
-                            const jvalue * args) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  auto unwrapperdArgs = UnwrapAllArguments(methodID, args); \
-  old_native_table->MethodName##A(env, \
-                    clazz, methodID, unwrapperdArgs.data()); \
-}
+#define DEFINE_FIELD_SETTER(FieldType, TypeName)                               \
+  void W_Set##TypeName##Field(JNIEnv *env, jobject obj, jfieldID fieldID,      \
+                              FieldType val) {                                 \
+    STATIC_PRINTER()                                                           \
+    obj = unwrap_ref(obj);                                                     \
+    val = UNWRAP(val);                                                         \
+    old_native_table->Set##TypeName##Field(env, obj, fieldID, val);            \
+  }
 
-#define DEFINE_FIELD_GETTER(FieldType, TypeName) \
-FieldType W_Get##TypeName##Field(JNIEnv *env, jobject obj, jfieldID fieldID) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  FieldType result; \
-  result = old_native_table->Get##TypeName##Field(env, \
-                    obj, fieldID); \
-  return WRAP(result); \
-}
+#define DEFINE_STATIC_FIELD_GETTER(FieldType, TypeName)                        \
+  FieldType W_GetStatic##TypeName##Field(JNIEnv *env, jclass clazz,            \
+                                         jfieldID fieldID) {                   \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    FieldType result;                                                          \
+    result =                                                                   \
+        old_native_table->GetStatic##TypeName##Field(env, clazz, fieldID);     \
+    return WRAP(result);                                                       \
+  }
 
-#define DEFINE_FIELD_SETTER(FieldType, TypeName) \
-void W_Set##TypeName##Field(JNIEnv *env, jobject obj, jfieldID fieldID, FieldType val) { \
-  STATIC_PRINTER() \
-  obj = unwrap_ref(obj); \
-  val = UNWRAP(val); \
-  old_native_table->Set##TypeName##Field(env, \
-                    obj, fieldID, val); \
-}
+#define DEFINE_STATIC_FIELD_SETTER(FieldType, TypeName)                        \
+  void W_SetStatic##TypeName##Field(JNIEnv *env, jclass clazz,                 \
+                                    jfieldID fieldID, FieldType val) {         \
+    STATIC_PRINTER()                                                           \
+    clazz = unwrap_ref(clazz);                                                 \
+    val = UNWRAP(val);                                                         \
+    old_native_table->SetStatic##TypeName##Field(env, clazz, fieldID, val);    \
+  }
 
-#define DEFINE_STATIC_FIELD_GETTER(FieldType, TypeName) \
-FieldType W_GetStatic##TypeName##Field(JNIEnv *env, jclass clazz, jfieldID fieldID) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  FieldType result; \
-  result = old_native_table->GetStatic##TypeName##Field(env, \
-                    clazz, fieldID); \
-  return WRAP(result); \
-}
+#define DEFINE_NEW_ARRAY(ArrayType, TypeName)                                  \
+  ArrayType##Array W_New##TypeName##Array(JNIEnv *env, jsize len) {            \
+    STATIC_PRINTER()                                                           \
+    ArrayType##Array result =                                                  \
+        old_native_table->New##TypeName##Array(env, len);                      \
+    return wrap_ref(result);                                                   \
+  }
 
-#define DEFINE_STATIC_FIELD_SETTER(FieldType, TypeName) \
-void W_SetStatic##TypeName##Field(JNIEnv *env, jclass clazz, jfieldID fieldID, \
-                                  FieldType val) { \
-  STATIC_PRINTER() \
-  clazz = unwrap_ref(clazz); \
-  val = UNWRAP(val); \
-  old_native_table->SetStatic##TypeName##Field(env, \
-                    clazz, fieldID, val); \
-}
+#define DEFINE_GET_ARRAY_ELEMENTS(ArrayType, TypeName)                         \
+  ArrayType *W_Get##TypeName##ArrayElements(                                   \
+      JNIEnv *env, ArrayType##Array array, jboolean *isCopy) {                 \
+    STATIC_PRINTER()                                                           \
+    array = unwrap_ref(array);                                                 \
+    return old_native_table->Get##TypeName##ArrayElements(env, array, isCopy); \
+  }
 
-#define DEFINE_NEW_ARRAY(ArrayType, TypeName) \
-ArrayType##Array W_New##TypeName##Array(JNIEnv *env, jsize len) { \
-  STATIC_PRINTER() \
-  ArrayType##Array result = old_native_table->New##TypeName##Array(env, len); \
-  return wrap_ref(result); \
-}
+#define DEFINE_RELEASE_ARRAY_ELEMENTS(ArrayType, TypeName)                     \
+  void W_Release##TypeName##ArrayElements(JNIEnv *env, ArrayType##Array array, \
+                                          ArrayType *elems, jint mode) {       \
+    STATIC_PRINTER()                                                           \
+    array = unwrap_ref(array);                                                 \
+    return old_native_table->Release##TypeName##ArrayElements(env, array,      \
+                                                              elems, mode);    \
+  }
 
-#define DEFINE_GET_ARRAY_ELEMENTS(ArrayType, TypeName) \
-ArrayType *W_Get##TypeName##ArrayElements(JNIEnv *env, ArrayType##Array array, \
-                                          jboolean *isCopy) { \
-  STATIC_PRINTER() \
-  array = unwrap_ref(array); \
-  return old_native_table->Get##TypeName##ArrayElements(env, array, isCopy); \
-}
+#define DEFINE_GET_ARRAY_REGION(ArrayType, TypeName)                           \
+  void W_Get##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array,       \
+                                    jsize start, jsize len, ArrayType *buf) {  \
+    STATIC_PRINTER()                                                           \
+    array = unwrap_ref(array);                                                 \
+    old_native_table->Get##TypeName##ArrayRegion(env, array, start, len, buf); \
+  }
 
-#define DEFINE_RELEASE_ARRAY_ELEMENTS(ArrayType, TypeName) \
-void W_Release##TypeName##ArrayElements(JNIEnv *env, ArrayType##Array array, \
-                                        ArrayType *elems, jint mode) { \
-  STATIC_PRINTER() \
-  array = unwrap_ref(array); \
-  return old_native_table->Release##TypeName##ArrayElements(env, array, elems, mode); \
-}
+#define DEFINE_SET_ARRAY_REGION(ArrayType, TypeName)                           \
+  void W_Set##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array,       \
+                                    jsize start, jsize len,                    \
+                                    const ArrayType *buf) {                    \
+    STATIC_PRINTER()                                                           \
+    array = unwrap_ref(array);                                                 \
+    old_native_table->Set##TypeName##ArrayRegion(env, array, start, len, buf); \
+  }
 
-#define DEFINE_GET_ARRAY_REGION(ArrayType, TypeName) \
-void W_Get##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array, \
-                                  jsize start, jsize len, ArrayType *buf) { \
-  STATIC_PRINTER() \
-  array = unwrap_ref(array); \
-  old_native_table->Get##TypeName##ArrayRegion(env, array, start, len, buf); \
-}
-
-#define DEFINE_SET_ARRAY_REGION(ArrayType, TypeName) \
-void W_Set##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array, \
-                              jsize start, jsize len, const ArrayType *buf) { \
-  STATIC_PRINTER() \
-  array = unwrap_ref(array); \
-  old_native_table->Set##TypeName##ArrayRegion(env, array, start, len, buf); \
-}
-
-#define CALL(type, name) \
-    DEFINE_CALL_WITH_TYPE(type, Call##name##Method) \
-    DEFINE_NONVIRT_CALL_WITH_TYPE(type, CallNonvirtual##name##Method) \
-    DEFINE_STATIC_CALL_WITH_TYPE(type, CallStatic##name##Method) \
-    DEFINE_FIELD_GETTER(type, name) \
-    DEFINE_FIELD_SETTER(type, name) \
-    DEFINE_STATIC_FIELD_GETTER(type, name) \
-    DEFINE_STATIC_FIELD_SETTER(type, name)
+#define CALL(type, name)                                                       \
+  DEFINE_CALL_WITH_TYPE(type, Call##name##Method)                              \
+  DEFINE_NONVIRT_CALL_WITH_TYPE(type, CallNonvirtual##name##Method)            \
+  DEFINE_STATIC_CALL_WITH_TYPE(type, CallStatic##name##Method)                 \
+  DEFINE_FIELD_GETTER(type, name)                                              \
+  DEFINE_FIELD_SETTER(type, name)                                              \
+  DEFINE_STATIC_FIELD_GETTER(type, name)                                       \
+  DEFINE_STATIC_FIELD_SETTER(type, name)
 
 #define WRAP(x) x
 #define UNWRAP(x) x
@@ -421,26 +428,26 @@ DEFINE_STATIC_VOID_CALL(CallStaticVoidMethod)
 #undef WRAP
 #undef UNWRAP
 
-#define CALL(type, name) \
-    DEFINE_NEW_ARRAY(type, name) \
-    DEFINE_GET_ARRAY_ELEMENTS(type, name) \
-    DEFINE_RELEASE_ARRAY_ELEMENTS(type, name) \
-    DEFINE_GET_ARRAY_REGION(type, name) \
-    DEFINE_SET_ARRAY_REGION(type, name)
+#define CALL(type, name)                                                       \
+  DEFINE_NEW_ARRAY(type, name)                                                 \
+  DEFINE_GET_ARRAY_ELEMENTS(type, name)                                        \
+  DEFINE_RELEASE_ARRAY_ELEMENTS(type, name)                                    \
+  DEFINE_GET_ARRAY_REGION(type, name)                                          \
+  DEFINE_SET_ARRAY_REGION(type, name)
 #include "jni_types.inc"
 #undef CALL
 
 void OverrideCallMethods(jniNativeInterface *jni_table) {
-#define CALL(type, name) \
-    jni_table->Call##name##Method = W_Call##name##Method; \
-    jni_table->Call##name##MethodA = W_Call##name##MethodA; \
-    jni_table->Call##name##MethodV = W_Call##name##MethodV; \
-    jni_table->CallNonvirtual##name##Method = W_CallNonvirtual##name##Method; \
-    jni_table->CallNonvirtual##name##MethodA = W_CallNonvirtual##name##MethodA; \
-    jni_table->CallNonvirtual##name##MethodV = W_CallNonvirtual##name##MethodV; \
-    jni_table->CallStatic##name##Method = W_CallStatic##name##Method; \
-    jni_table->CallStatic##name##MethodA = W_CallStatic##name##MethodA; \
-    jni_table->CallStatic##name##MethodV = W_CallStatic##name##MethodV;
+#define CALL(type, name)                                                       \
+  jni_table->Call##name##Method = W_Call##name##Method;                        \
+  jni_table->Call##name##MethodA = W_Call##name##MethodA;                      \
+  jni_table->Call##name##MethodV = W_Call##name##MethodV;                      \
+  jni_table->CallNonvirtual##name##Method = W_CallNonvirtual##name##Method;    \
+  jni_table->CallNonvirtual##name##MethodA = W_CallNonvirtual##name##MethodA;  \
+  jni_table->CallNonvirtual##name##MethodV = W_CallNonvirtual##name##MethodV;  \
+  jni_table->CallStatic##name##Method = W_CallStatic##name##Method;            \
+  jni_table->CallStatic##name##MethodA = W_CallStatic##name##MethodA;          \
+  jni_table->CallStatic##name##MethodV = W_CallStatic##name##MethodV;
 #define CALL_OBJECT() CALL(jobject, Object)
 #define CALL_VOID() CALL(0, Void)
 #include "jni_types.inc"
@@ -448,62 +455,60 @@ void OverrideCallMethods(jniNativeInterface *jni_table) {
 #undef CALL_OBJECT
 #undef CALL_VOID
 
-#define CALL(type, name) \
-    jni_table->Set##name##Field = W_Set##name##Field; \
-    jni_table->Get##name##Field = W_Get##name##Field; \
-    jni_table->SetStatic##name##Field = W_SetStatic##name##Field; \
-    jni_table->GetStatic##name##Field = W_GetStatic##name##Field; \
-    jni_table->New##name##Array = W_New##name##Array; \
-    jni_table->Get##name##ArrayElements = W_Get##name##ArrayElements; \
-    jni_table->Release##name##ArrayElements = W_Release##name##ArrayElements; \
-    jni_table->Get##name##ArrayRegion = W_Get##name##ArrayRegion; \
-    jni_table->Set##name##ArrayRegion = W_Set##name##ArrayRegion;
+#define CALL(type, name)                                                       \
+  jni_table->Set##name##Field = W_Set##name##Field;                            \
+  jni_table->Get##name##Field = W_Get##name##Field;                            \
+  jni_table->SetStatic##name##Field = W_SetStatic##name##Field;                \
+  jni_table->GetStatic##name##Field = W_GetStatic##name##Field;                \
+  jni_table->New##name##Array = W_New##name##Array;                            \
+  jni_table->Get##name##ArrayElements = W_Get##name##ArrayElements;            \
+  jni_table->Release##name##ArrayElements = W_Release##name##ArrayElements;    \
+  jni_table->Get##name##ArrayRegion = W_Get##name##ArrayRegion;                \
+  jni_table->Set##name##ArrayRegion = W_Set##name##ArrayRegion;
 #define CALL_OBJECT()
 #define CALL_VOID()
 #include "jni_types.inc"
 #undef CALL
 #undef CALL_OBJECT
 #undef CALL_VOID
-
 }
 
-
-JNICALL jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID, ...) {
+JNICALL jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID,
+                            ...) {
   STATIC_PRINTER()
   clazz = unwrap_ref(clazz);
   va_list args;
   va_start(args, methodID);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
-  jobject result = old_native_table->NewObjectA(env,
-                      clazz, methodID, unwrapperdArgs.data());
+  jobject result =
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   va_end(args);
   return wrap_ref(result);
 }
 
 JNICALL jobject W_NewObjectV(JNIEnv *env, jclass clazz, jmethodID methodID,
-                   va_list args) {
+                             va_list args) {
   STATIC_PRINTER()
   clazz = unwrap_ref(clazz);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
-  jobject result = old_native_table->NewObjectA(env,
-                    clazz, methodID, unwrapperdArgs.data());
+  jobject result =
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   return wrap_ref(result);
 }
 JNICALL jobject W_NewObjectA(JNIEnv *env, jclass clazz, jmethodID methodID,
-                   const jvalue *args) {
+                             const jvalue *args) {
   STATIC_PRINTER()
   clazz = unwrap_ref(clazz);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
-  jobject result = old_native_table->NewObjectA(env,
-                    clazz, methodID, unwrapperdArgs.data());
+  jobject result =
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   return wrap_ref(result);
 }
 
-jclass W_DefineClass(JNIEnv *env, const char *name,
-                     jobject loader, const jbyte *buf,
-                     jsize len) {
+jclass W_DefineClass(JNIEnv *env, const char *name, jobject loader,
+                     const jbyte *buf, jsize len) {
   STATIC_PRINTER()
-  loader =unwrap_ref(loader);
+  loader = unwrap_ref(loader);
   auto result = old_native_table->DefineClass(env, name, loader, buf, len);
   return wrap_ref(result);
 }
@@ -526,48 +531,51 @@ jfieldID W_FromReflectedField(JNIEnv *env, jobject field) {
   return old_native_table->FromReflectedField(env, field);
 }
 
-jobject W_ToReflectedMethod(JNIEnv *env, jclass cls, jmethodID methodID, jboolean isStatic) {
+jobject W_ToReflectedMethod(JNIEnv *env, jclass cls, jmethodID methodID,
+                            jboolean isStatic) {
   STATIC_PRINTER()
   cls = unwrap_ref(cls);
-  auto result = old_native_table->ToReflectedMethod(env, cls, methodID, isStatic);
+  auto result =
+      old_native_table->ToReflectedMethod(env, cls, methodID, isStatic);
   result = wrap_ref(result);
   return result;
 }
 
-jobject W_ToReflectedField(JNIEnv *env, jclass cls, jfieldID fieldID, jboolean isStatic) {
+jobject W_ToReflectedField(JNIEnv *env, jclass cls, jfieldID fieldID,
+                           jboolean isStatic) {
   STATIC_PRINTER()
   cls = unwrap_ref(cls);
-  auto result = old_native_table->ToReflectedField(env,cls,fieldID,isStatic);
+  auto result = old_native_table->ToReflectedField(env, cls, fieldID, isStatic);
   result = wrap_ref(result);
   return result;
 }
 
 jmethodID W_GetMethodID(JNIEnv *env, jclass clazz, const char *name,
-                    const char *sig) {
-  STATIC_PRINTER()
-  clazz = unwrap_ref(clazz);
-  return old_native_table->GetMethodID(env,clazz,name,sig);
-}
-
-jfieldID W_GetFieldID(JNIEnv *env, jclass clazz, const char *name,
-                  const char *sig) {
-  STATIC_PRINTER()
-  clazz = unwrap_ref(clazz);
-  return old_native_table->GetFieldID(env,clazz,name,sig);
-}
-
-jmethodID W_GetStaticMethodID(JNIEnv *env, jclass clazz, const char *name,
-                          const char *sig) {
-  STATIC_PRINTER()
-  clazz = unwrap_ref(clazz);
-  return old_native_table->GetStaticMethodID(env,clazz,name,sig);
-}
-
-jfieldID W_GetStaticFieldID(JNIEnv *env, jclass clazz, const char *name,
                         const char *sig) {
   STATIC_PRINTER()
   clazz = unwrap_ref(clazz);
-  return old_native_table->GetStaticFieldID(env,clazz,name,sig);
+  return old_native_table->GetMethodID(env, clazz, name, sig);
+}
+
+jfieldID W_GetFieldID(JNIEnv *env, jclass clazz, const char *name,
+                      const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetFieldID(env, clazz, name, sig);
+}
+
+jmethodID W_GetStaticMethodID(JNIEnv *env, jclass clazz, const char *name,
+                              const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetStaticMethodID(env, clazz, name, sig);
+}
+
+jfieldID W_GetStaticFieldID(JNIEnv *env, jclass clazz, const char *name,
+                            const char *sig) {
+  STATIC_PRINTER()
+  clazz = unwrap_ref(clazz);
+  return old_native_table->GetStaticFieldID(env, clazz, name, sig);
 }
 
 jclass W_GetSuperclass(JNIEnv *env, jclass sub) {
@@ -595,14 +603,14 @@ jboolean W_IsSameObject(JNIEnv *env, jobject obj1, jobject obj2) {
 jobject W_AllocObject(JNIEnv *env, jclass clazz) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
-  auto result = old_native_table->AllocObject(env,clazz);
+  auto result = old_native_table->AllocObject(env, clazz);
   return wrap_ref(result);
 }
 
 jclass W_GetObjectClass(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
-  auto result = old_native_table->GetObjectClass(env,obj);
+  auto result = old_native_table->GetObjectClass(env, obj);
   return wrap_ref(result);
 }
 
@@ -610,11 +618,11 @@ jboolean W_IsInstanceOf(JNIEnv *env, jobject obj, jclass clazz) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
   clazz = unwrap_ref(clazz);
-  return old_native_table->IsInstanceOf(env,obj,clazz);
+  return old_native_table->IsInstanceOf(env, obj, clazz);
 }
 
 jobjectArray W_NewObjectArray(JNIEnv *env, jsize len, jclass clazz,
-                            jobject init) {
+                              jobject init) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
   init = unwrap_ref(init);
@@ -630,7 +638,7 @@ jobject W_GetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index) {
 }
 
 void W_SetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index,
-                           jobject val) {
+                             jobject val) {
   STATIC_PRINTER();
   array = unwrap_ref(array);
   val = unwrap_ref(val);
@@ -657,7 +665,7 @@ jthrowable W_ExceptionOccurred(JNIEnv *env) {
 
 jint W_PushLocalFrame(JNIEnv *env, jint capacity) {
   STATIC_PRINTER();
-  return old_native_table->PushLocalFrame(env,capacity);
+  return old_native_table->PushLocalFrame(env, capacity);
 }
 
 jobject W_PopLocalFrame(JNIEnv *env, jobject obj) {
@@ -670,14 +678,14 @@ jobject W_PopLocalFrame(JNIEnv *env, jobject obj) {
 jobject W_NewGlobalRef(JNIEnv *env, jobject lobj) {
   STATIC_PRINTER();
   lobj = unwrap_ref(lobj);
-  auto result = old_native_table->NewGlobalRef(env,lobj);
+  auto result = old_native_table->NewGlobalRef(env, lobj);
   return wrap_ref(result);
 }
 
 void W_DeleteGlobalRef(JNIEnv *env, jobject gref) {
   STATIC_PRINTER();
   gref = unwrap_ref(gref);
-  old_native_table->DeleteGlobalRef(env,gref);
+  old_native_table->DeleteGlobalRef(env, gref);
 }
 
 void W_DeleteLocalRef(JNIEnv *env, jobject obj) {
@@ -689,58 +697,58 @@ void W_DeleteLocalRef(JNIEnv *env, jobject obj) {
 jobject W_NewLocalRef(JNIEnv *env, jobject ref) {
   STATIC_PRINTER();
   ref = unwrap_ref(ref);
-  auto result = old_native_table->NewLocalRef(env,ref);
+  auto result = old_native_table->NewLocalRef(env, ref);
   return wrap_ref(result);
 }
 
-jstring W_NewString(JNIEnv *env,const jchar *unicode, jsize len) {
+jstring W_NewString(JNIEnv *env, const jchar *unicode, jsize len) {
   STATIC_PRINTER();
-  auto result = old_native_table->NewString(env,unicode,len);
+  auto result = old_native_table->NewString(env, unicode, len);
   return wrap_ref(result);
 }
-jsize W_GetStringLength(JNIEnv *env,jstring str) {
+jsize W_GetStringLength(JNIEnv *env, jstring str) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  return old_native_table->GetStringLength(env,str);
+  return old_native_table->GetStringLength(env, str);
 }
-const jchar *W_GetStringChars(JNIEnv *env,jstring str, jboolean *isCopy) {
+const jchar *W_GetStringChars(JNIEnv *env, jstring str, jboolean *isCopy) {
   str = unwrap_ref(str);
-  return old_native_table->GetStringChars(env,str,isCopy);
+  return old_native_table->GetStringChars(env, str, isCopy);
 }
-void W_ReleaseStringChars(JNIEnv *env,jstring str, const jchar *chars) {
+void W_ReleaseStringChars(JNIEnv *env, jstring str, const jchar *chars) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  old_native_table->ReleaseStringChars(env,str,chars);
+  old_native_table->ReleaseStringChars(env, str, chars);
 }
 
-jstring W_NewStringUTF(JNIEnv *env,const char *utf) {
+jstring W_NewStringUTF(JNIEnv *env, const char *utf) {
   STATIC_PRINTER();
-  auto result = old_native_table->NewStringUTF(env,utf);
+  auto result = old_native_table->NewStringUTF(env, utf);
   return wrap_ref(result);
 }
-jsize W_GetStringUTFLength(JNIEnv *env,jstring str) {
+jsize W_GetStringUTFLength(JNIEnv *env, jstring str) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  return old_native_table->GetStringUTFLength(env,str);
+  return old_native_table->GetStringUTFLength(env, str);
 }
-const char* W_GetStringUTFChars(JNIEnv *env,jstring str, jboolean *isCopy) {
+const char *W_GetStringUTFChars(JNIEnv *env, jstring str, jboolean *isCopy) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  return old_native_table->GetStringUTFChars(env,str,isCopy);
+  return old_native_table->GetStringUTFChars(env, str, isCopy);
 }
-void W_ReleaseStringUTFChars(JNIEnv *env,jstring str, const char* chars) {
+void W_ReleaseStringUTFChars(JNIEnv *env, jstring str, const char *chars) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  old_native_table->ReleaseStringUTFChars(env,str,chars);
+  old_native_table->ReleaseStringUTFChars(env, str, chars);
 }
 
-jsize W_GetArrayLength(JNIEnv *env,jarray array) {
+jsize W_GetArrayLength(JNIEnv *env, jarray array) {
   STATIC_PRINTER();
   array = unwrap_ref(array);
-  return old_native_table->GetArrayLength(env,array);
+  return old_native_table->GetArrayLength(env, array);
 }
-jint W_RegisterNatives(JNIEnv *env,jclass clazz, const JNINativeMethod *methods,
-                       jint nMethods) {
+jint W_RegisterNatives(JNIEnv *env, jclass clazz,
+                       const JNINativeMethod *methods, jint nMethods) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
   std::vector<JNINativeMethod> new_methods(nMethods);
@@ -752,86 +760,88 @@ jint W_RegisterNatives(JNIEnv *env,jclass clazz, const JNINativeMethod *methods,
     //                                     methods[i].fnPtr);
     new_methods[i].fnPtr = methods[i].fnPtr;
   }
-  return old_native_table->RegisterNatives(env, clazz,
-                                           new_methods.data(),
+  return old_native_table->RegisterNatives(env, clazz, new_methods.data(),
                                            nMethods);
 }
-jint W_UnregisterNatives(JNIEnv *env,jclass clazz) {
+jint W_UnregisterNatives(JNIEnv *env, jclass clazz) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
   return old_native_table->UnregisterNatives(env, clazz);
 }
 
-jint W_MonitorEnter(JNIEnv *env,jobject obj) {
+jint W_MonitorEnter(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
-  return old_native_table->MonitorEnter(env,obj);
+  return old_native_table->MonitorEnter(env, obj);
 }
-jint W_MonitorExit(JNIEnv *env,jobject obj) {
+jint W_MonitorExit(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
-  return old_native_table->MonitorExit(env,obj);
+  return old_native_table->MonitorExit(env, obj);
 }
 
-void W_GetStringRegion(JNIEnv *env,jstring str, jsize start, jsize len, jchar *buf) {
+void W_GetStringRegion(JNIEnv *env, jstring str, jsize start, jsize len,
+                       jchar *buf) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  old_native_table->GetStringRegion(env,str,start,len,buf);
+  old_native_table->GetStringRegion(env, str, start, len, buf);
 }
-void W_GetStringUTFRegion(JNIEnv *env,jstring str, jsize start, jsize len, char *buf) {
+void W_GetStringUTFRegion(JNIEnv *env, jstring str, jsize start, jsize len,
+                          char *buf) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  old_native_table->GetStringUTFRegion(env,str,start,len,buf);
+  old_native_table->GetStringUTFRegion(env, str, start, len, buf);
 }
 
-void * W_GetPrimitiveArrayCritical(JNIEnv *env,jarray array, jboolean *isCopy) {
+void *W_GetPrimitiveArrayCritical(JNIEnv *env, jarray array, jboolean *isCopy) {
   STATIC_PRINTER();
   array = unwrap_ref(array);
-  return old_native_table->GetPrimitiveArrayCritical(env,array,isCopy);
+  return old_native_table->GetPrimitiveArrayCritical(env, array, isCopy);
 }
-void W_ReleasePrimitiveArrayCritical(JNIEnv *env,jarray array, void *carray, jint mode) {
+void W_ReleasePrimitiveArrayCritical(JNIEnv *env, jarray array, void *carray,
+                                     jint mode) {
   STATIC_PRINTER();
   array = unwrap_ref(array);
-  old_native_table->ReleasePrimitiveArrayCritical(env,array,carray,mode);
+  old_native_table->ReleasePrimitiveArrayCritical(env, array, carray, mode);
 }
 
-const jchar * W_GetStringCritical(JNIEnv *env,jstring str, jboolean *isCopy) {
+const jchar *W_GetStringCritical(JNIEnv *env, jstring str, jboolean *isCopy) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  return old_native_table->GetStringCritical(env,str,isCopy);
+  return old_native_table->GetStringCritical(env, str, isCopy);
 }
-void W_ReleaseStringCritical(JNIEnv *env,jstring str, const jchar *cstring) {
+void W_ReleaseStringCritical(JNIEnv *env, jstring str, const jchar *cstring) {
   STATIC_PRINTER();
   str = unwrap_ref(str);
-  old_native_table->ReleaseStringCritical(env,str,cstring);
+  old_native_table->ReleaseStringCritical(env, str, cstring);
 }
 
-jweak W_NewWeakGlobalRef(JNIEnv *env,jobject obj) {
+jweak W_NewWeakGlobalRef(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
-  return old_native_table->NewWeakGlobalRef(env,obj);
+  return old_native_table->NewWeakGlobalRef(env, obj);
 }
-void W_DeleteWeakGlobalRef(JNIEnv *env,jweak ref) {
+void W_DeleteWeakGlobalRef(JNIEnv *env, jweak ref) {
   STATIC_PRINTER();
-  old_native_table->DeleteWeakGlobalRef(env,ref);
+  old_native_table->DeleteWeakGlobalRef(env, ref);
 }
 
-jobject W_NewDirectByteBuffer(JNIEnv *env,void* address, jlong capacity) {
+jobject W_NewDirectByteBuffer(JNIEnv *env, void *address, jlong capacity) {
   STATIC_PRINTER();
   auto result = old_native_table->NewDirectByteBuffer(env, address, capacity);
   return wrap_ref(result);
 }
-void* W_GetDirectBufferAddress(JNIEnv *env, jobject buf) {
+void *W_GetDirectBufferAddress(JNIEnv *env, jobject buf) {
   STATIC_PRINTER();
   buf = unwrap_ref(buf);
   return old_native_table->GetDirectBufferAddress(env, buf);
 }
-jlong W_GetDirectBufferCapacity(JNIEnv *env,jobject buf) {
+jlong W_GetDirectBufferCapacity(JNIEnv *env, jobject buf) {
   STATIC_PRINTER();
   buf = unwrap_ref(buf);
   return old_native_table->GetDirectBufferCapacity(env, buf);
 }
-jobjectRefType W_GetObjectRefType(JNIEnv *env,jobject obj) {
+jobjectRefType W_GetObjectRefType(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
   obj = unwrap_ref(obj);
   return old_native_table->GetObjectRefType(env, obj);
@@ -839,13 +849,16 @@ jobjectRefType W_GetObjectRefType(JNIEnv *env,jobject obj) {
 
 jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
   ti = tiEnv;
-  if (ti == nullptr) return JVMTI_ERROR_INVALID_OBJECT;
+  if (ti == nullptr)
+    return JVMTI_ERROR_INVALID_OBJECT;
 
   jvmtiError error = ti->GetJNIFunctionTable(&old_native_table);
-  if(error != JNI_OK) return error;
+  if (error != JNI_OK)
+    return error;
 
   error = ti->GetJNIFunctionTable(&new_native_table);
-  if(error != JNI_OK) return error;
+  if (error != JNI_OK)
+    return error;
 
   new_native_table->NewObject = W_NewObject;
   new_native_table->NewObjectA = W_NewObjectA;
@@ -893,7 +906,8 @@ jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
   new_native_table->GetStringRegion = W_GetStringRegion;
   new_native_table->GetStringUTFRegion = W_GetStringUTFRegion;
   new_native_table->GetPrimitiveArrayCritical = W_GetPrimitiveArrayCritical;
-  new_native_table->ReleasePrimitiveArrayCritical = W_ReleasePrimitiveArrayCritical;
+  new_native_table->ReleasePrimitiveArrayCritical =
+      W_ReleasePrimitiveArrayCritical;
   new_native_table->GetStringCritical = W_GetStringCritical;
   new_native_table->ReleaseStringCritical = W_ReleaseStringCritical;
   new_native_table->NewWeakGlobalRef = W_NewWeakGlobalRef;
@@ -905,8 +919,7 @@ jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
 
   OverrideCallMethods(new_native_table);
   error = ti->SetJNIFunctionTable(new_native_table);
-  if(error != JNI_OK) return error;
+  if (error != JNI_OK)
+    return error;
   return JVMTI_ERROR_NONE;
 }
-
-

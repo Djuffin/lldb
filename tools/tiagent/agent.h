@@ -1,7 +1,7 @@
 #pragma once
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 
@@ -28,16 +28,12 @@ llvm::SmallString<8> SignatureToShortString(const MethodSignature &sig);
 llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
                                                    int extraPtrArgs = 0);
 
-llvm::FunctionType *ConvertSignatureToFunctionType(
-                                 const MethodSignature& signature,
-                                 llvm::LLVMContext &context);
+llvm::FunctionType *
+ConvertSignatureToFunctionType(const MethodSignature &signature,
+                               llvm::LLVMContext &context);
 
+template <class T> void print(const T &x);
 
-template <class T>
-void print(const T &x);
+inline void print(const char *x) { print(std::string(x)); }
 
-inline void print(const char *x) {
-  print(std::string(x));
-}
-
-void *gen_function(char* name, char *signature, void *func_ptr);
+void *gen_function(char *name, char *signature, void *func_ptr);
