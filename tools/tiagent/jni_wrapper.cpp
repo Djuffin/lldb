@@ -1,6 +1,5 @@
-#include "common.h"
-#include "jni.h"
-#include "jvmti.h"
+#include "agent.h"
+#include "jni_wrapper.h"
 
 using namespace llvm;
 
@@ -8,22 +7,17 @@ static jniNativeInterface* old_native_table;
 static jniNativeInterface* new_native_table;
 static jvmtiEnv* ti;
 
-template<class T>
-T *unwrap_ref(T *ref) {
-  return ref;
-}
+constexpr uint64_t ref_mask = 0; //(1ull << 62);
 
-jobject unwrap_ref(jobject ref) {
-  return ref;
+void* unwrap_raw_ref(void* ref) {
+  uint64_t x = (uint64_t)ref;
+  x ^= ref_mask;
+  return (void *)x;
 }
-
-template<class T>
-T *wrap_ref(T *ref) {
-  return ref;
-}
-
-jobject wrap_ref(jobject ref) {
-  return ref;
+void* wrap_raw_ref(void* ref) {
+  uint64_t x = (uint64_t)ref;
+  x ^= ref_mask;
+  return (void *)x;
 }
 
 #define ASSERT(x) if (!(x)) { \
@@ -130,7 +124,7 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID,
 
 
 #define STATIC_PRINTER() \
-  static int i = 0; if (i++ == 0) { print("called"); print(__FUNCTION__); }
+  static int i = 0; if (i++ < 100) { print(__FUNCTION__); }
 
 #define DEFINE_CALL_WITH_TYPE(RetType, MethodName) \
 JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, ...) { \
@@ -414,7 +408,7 @@ void W_Set##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array, \
 
 #define WRAP(x) x
 #define UNWRAP(x) x
-#include "jni_calls.inc"
+#include "jni_types.inc"
 #undef WRAP
 #undef UNWRAP
 #define WRAP(x) wrap_ref(x)
@@ -433,7 +427,7 @@ DEFINE_STATIC_VOID_CALL(CallStaticVoidMethod)
     DEFINE_RELEASE_ARRAY_ELEMENTS(type, name) \
     DEFINE_GET_ARRAY_REGION(type, name) \
     DEFINE_SET_ARRAY_REGION(type, name)
-#include "jni_calls.inc"
+#include "jni_types.inc"
 #undef CALL
 
 void OverrideCallMethods(jniNativeInterface *jni_table) {
@@ -449,7 +443,7 @@ void OverrideCallMethods(jniNativeInterface *jni_table) {
     jni_table->CallStatic##name##MethodV = W_CallStatic##name##MethodV;
 #define CALL_OBJECT() CALL(jobject, Object)
 #define CALL_VOID() CALL(0, Void)
-#include "jni_calls.inc"
+#include "jni_types.inc"
 #undef CALL
 #undef CALL_OBJECT
 #undef CALL_VOID
@@ -466,7 +460,7 @@ void OverrideCallMethods(jniNativeInterface *jni_table) {
     jni_table->Set##name##ArrayRegion = W_Set##name##ArrayRegion;
 #define CALL_OBJECT()
 #define CALL_VOID()
-#include "jni_calls.inc"
+#include "jni_types.inc"
 #undef CALL
 #undef CALL_OBJECT
 #undef CALL_VOID
@@ -749,12 +743,23 @@ jint W_RegisterNatives(JNIEnv *env,jclass clazz, const JNINativeMethod *methods,
                        jint nMethods) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
-  return old_native_table->RegisterNatives(env,clazz,methods,nMethods);
+  std::vector<JNINativeMethod> new_methods(nMethods);
+  for (int i = 0; i < nMethods; ++i) {
+    new_methods[i].name = methods[i].name;
+    new_methods[i].signature = methods[i].signature;
+    // new_methods[i].fnPtr = gen_function(methods[i].name,
+    //                                     methods[i].signature,
+    //                                     methods[i].fnPtr);
+    new_methods[i].fnPtr = methods[i].fnPtr;
+  }
+  return old_native_table->RegisterNatives(env, clazz,
+                                           new_methods.data(),
+                                           nMethods);
 }
 jint W_UnregisterNatives(JNIEnv *env,jclass clazz) {
   STATIC_PRINTER();
   clazz = unwrap_ref(clazz);
-  return old_native_table->UnregisterNatives(env,clazz);
+  return old_native_table->UnregisterNatives(env, clazz);
 }
 
 jint W_MonitorEnter(JNIEnv *env,jobject obj) {

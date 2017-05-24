@@ -6,7 +6,6 @@ include_directories(
 
 add_lldb_library(tiagent SHARED
   agent.cpp
-  common.cpp
   jni_wrapper.cpp
 
   LINK_COMPONENTS

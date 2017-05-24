@@ -53,16 +53,162 @@
 #include <string.h>
 #include <fcntl.h>
 
-#include "common.h"
+#include "agent.h"
 #include "jni_wrapper.h"
 
-#define LOG_PREFIX "/data/data/com.eugene.sum/"
-// #define LOG_PREFIX "/usr/local/google/home/ezemtsov/projects/j/"
+
 
 using namespace llvm;
 using namespace llvm::orc;
 
+SmallString<8> SignatureToShortString(const MethodSignature &sig) {
+  auto get_type_char = [](JavaType type) -> char {
+    switch (type) {
+      case JavaType::jvoid:
+        return 'V';
+      case JavaType::jboolean:
+        return 'Z';
+      case JavaType::jbyte:
+        return 'B';
+      case JavaType::jchar:
+        return 'C';
+      case JavaType::jshort:
+        return 'S';
+      case JavaType::jint:
+        return 'I';
+      case JavaType::jlong:
+        return 'J';
+      case JavaType::jfloat:
+        return 'F';
+      case JavaType::jdouble:
+        return 'D';
+      case JavaType::jobject:
+        return 'L';
+    }
+    return 0;
+  };
 
+  SmallString<8> result;
+  result.append(1, get_type_char(sig.return_type));
+  for (auto type : sig.arguments) {
+    result.append(1, get_type_char(type));
+  }
+  result.append(1, '\0');
+  return result;
+}
+
+FunctionType *ConvertSignatureToFunctionType(const MethodSignature& signature,
+                                 llvm::LLVMContext &context) {
+  auto convert_type = [&context] (JavaType type) -> Type * {
+      switch (type) {
+        case JavaType::jvoid:
+          return Type::getVoidTy(context);
+        case JavaType::jboolean:
+          return Type::getInt8Ty(context);
+        case JavaType::jbyte:
+          return Type::getInt8Ty(context);
+        case JavaType::jchar:
+          return Type::getInt16Ty(context);
+        case JavaType::jshort:
+          return Type::getInt16Ty(context);
+        case JavaType::jint:
+          return Type::getInt32Ty(context);
+        case JavaType::jlong:
+          return Type::getInt64Ty(context);
+        case JavaType::jfloat:
+          return Type::getFloatTy(context);
+        case JavaType::jdouble:
+          return Type::getDoubleTy(context);
+        case JavaType::jobject:
+          return Type::getInt8Ty(context)->getPointerTo();
+      }
+      return nullptr;
+  };
+
+  std::vector<Type*> args;
+  for (auto type : signature.arguments) {
+    args.push_back(convert_type(type));
+  }
+
+  return FunctionType::get(convert_type(signature.return_type), args, false);
+}
+
+llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
+                                                   int extraPtrArgs) {
+    if (str == nullptr) return None;
+    const char* ptr = str;
+    std::function<Optional<JavaType>()> consumeType =
+      [&ptr, &consumeType]()->Optional<JavaType> {
+      switch (*ptr) {
+        case 'V':
+          ptr++;
+          return JavaType::jvoid;
+        case 'Z':
+          ptr++;
+          return JavaType::jboolean;
+        case 'B':
+          ptr++;
+          return JavaType::jbyte;
+        case 'C':
+          ptr++;
+          return JavaType::jchar;
+        case 'S':
+          ptr++;
+          return JavaType::jshort;
+        case 'I':
+          ptr++;
+          return JavaType::jint;
+        case 'J':
+          ptr++;
+          return JavaType::jlong;
+        case 'F':
+          ptr++;
+          return JavaType::jfloat;
+        case 'D':
+          ptr++;
+          return JavaType::jdouble;
+        case 'L':
+          while (*ptr && *ptr != ';') ptr++;
+          if (*ptr == ';') {
+            ptr++;
+            return JavaType::jobject;
+          } else {
+            return None;
+          }
+        case '[': {
+          ptr++;
+          if (consumeType())
+            return JavaType::jobject;
+          else
+            return None;
+        }
+        default:
+          return None;
+      };
+    };
+
+    MethodSignature result;
+    if (*ptr != '(') return None;
+    ptr++;
+    for (;extraPtrArgs > 0; --extraPtrArgs) {
+      result.arguments.push_back(JavaType::jobject);
+    }
+
+    while (*ptr && *ptr != ')') {
+      auto type = consumeType();
+      if (!type) return None;
+      result.arguments.push_back(type.getValue());
+    }
+    if (*ptr != ')') return None;
+    ptr++;
+    Optional<JavaType> returnType = consumeType();
+    if (!returnType || *ptr) return None;
+
+    result.return_type = returnType.getValue();
+    return result;
+};
+
+#define LOG_PREFIX "/data/data/com.eugene.sum/"
 static std::mutex g_print_mutex;
 template <class T>
 void print(const T &x) {
@@ -72,6 +218,9 @@ void print(const T &x) {
   file_stream << x << "\n";
   file_stream.close();
 }
+
+template void print<int>(const int&);
+template void print<uint64_t>(const uint64_t&);
 
 bool IsDebuggerPresent()
 {
@@ -99,13 +248,6 @@ bool IsDebuggerPresent()
 
     return debugger_present;
 }
-
-JNIEXPORT jint JNICALL fortytwo (JNIEnv *env, jobject instance, jint a, jint b) {
-  return 42;
-}
-
-typedef jint (*add_ptr)(JNIEnv *, jclass, jint, jint);
-
 
 typedef ArrayRef<uint8_t> Codeblock;
 
@@ -147,7 +289,7 @@ public:
   }
 };
 
-class KaleidoscopeJIT {
+class LlvmJit {
 private:
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
@@ -155,17 +297,15 @@ private:
   IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
 
 public:
-  typedef decltype(CompileLayer)::ModuleSetHandleT ModuleHandle;
-
-  KaleidoscopeJIT()
+  LlvmJit()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM))
   {}
 
   TargetMachine &getTargetMachine() { return *TM; }
 
-  ModuleHandle addModule(std::unique_ptr<Module> M,
-                         std::unique_ptr<SectionMemoryManagerWrapper> MM) {
+  void addModule(std::unique_ptr<Module> M,
+                 std::unique_ptr<SectionMemoryManagerWrapper> MM) {
     auto Resolver = createLambdaResolver(
         [&](const std::string &Name) {
           if (auto Sym = CompileLayer.findSymbol(Name, false))
@@ -179,21 +319,19 @@ public:
           return JITSymbol(nullptr);
         });
 
-    print(*M);
-
     std::vector<std::unique_ptr<Module>> Ms;
     Ms.push_back(std::move(M));
 
-    return CompileLayer.addModuleSet(std::move(Ms),
+    CompileLayer.addModuleSet(std::move(Ms),
               std::move(MM),
               std::move(Resolver));
   }
 
-  JITSymbol findSymbol(const std::string Name) {
-    std::string MangledName;
-    raw_string_ostream MangledNameStream(MangledName);
-    Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
-    return CompileLayer.findSymbol(MangledNameStream.str(), true);
+  JITSymbol findSymbol(const std::string &name) {
+    // std::string MangledName;
+    // raw_string_ostream MangledNameStream(MangledName);
+    // Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
+    return CompileLayer.findSymbol(name, true);
   }
 };
 
@@ -229,15 +367,15 @@ class Codegen {
     g_ret_pc_to_native_func = new DenseMap<uint64_t, uint64_t>(10000);
 
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
-    llvm::sys::DynamicLibrary::AddSymbol("wrap_ref", reinterpret_cast<void*>(wrap_ref));
-    llvm::sys::DynamicLibrary::AddSymbol("unwrap_ref", reinterpret_cast<void*>(unwrap_ref));
+    llvm::sys::DynamicLibrary::AddSymbol("wrap_ref", reinterpret_cast<void*>(wrap_raw_ref));
+    llvm::sys::DynamicLibrary::AddSymbol("unwrap_ref", reinterpret_cast<void*>(unwrap_raw_ref));
     llvm::sys::DynamicLibrary::AddSymbol("print", reinterpret_cast<void*>(print<char *>));
     llvm::sys::DynamicLibrary::AddSymbol("lookup_native_func", reinterpret_cast<void*>(lookup_native_func));
     InitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
     context_ = make_unique<LLVMContext>();
-    jit_ = make_unique<KaleidoscopeJIT>();
+    jit_ = make_unique<LlvmJit>();
   }
 
   void *jit_new_stub(const MethodSignature &sig) {
@@ -350,7 +488,7 @@ class Codegen {
 
  private:
   std::unique_ptr<LLVMContext> context_;
-  std::unique_ptr<KaleidoscopeJIT> jit_;
+  std::unique_ptr<LlvmJit> jit_;
   StringMap<Codeblock> signature_to_code_;
   SectionMemoryManager memory_manager_;
   std::string error_str;
@@ -401,11 +539,7 @@ NativeMethodBind(jvmtiEnv *ti,
   error = ti->GetClassSignature(declaring_class, &class_signature_ptr, nullptr);
   if (error != JNI_OK) return;
   {
-    void *f = nullptr;
-    //print("NativeMethodBind");
-    //print(method_name_ptr);
-    //if (std::string(method_name_ptr) == "add")
-      f = gen_function(method_name_ptr, method_signature_ptr, address);
+    void *f = gen_function(method_name_ptr, method_signature_ptr, address);
     if (f) {
       *new_address_ptr = f;
     }

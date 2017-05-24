@@ -23,8 +23,6 @@ struct MethodSignature {
   JavaType return_type;
 };
 
-bool operator ==(const MethodSignature &a, const MethodSignature &b);
-
 llvm::SmallString<8> SignatureToShortString(const MethodSignature &sig);
 
 llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
@@ -41,3 +39,5 @@ void print(const T &x);
 inline void print(const char *x) {
   print(std::string(x));
 }
+
+void *gen_function(char* name, char *signature, void *func_ptr);
