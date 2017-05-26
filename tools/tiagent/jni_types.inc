@@ -1,3 +1,7 @@
+#ifdef CALL_OBJECT
+CALL_OBJECT()
+#endif
+
 #ifdef CALL
 CALL(jboolean, Boolean)
 CALL(jbyte, Byte)
@@ -11,8 +15,4 @@ CALL(jfloat, Float)
 
 #ifdef CALL_VOID
 CALL_VOID()
-#endif
-
-#ifdef CALL_OBJECT
-CALL_OBJECT()
 #endif

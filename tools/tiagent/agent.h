@@ -37,3 +37,10 @@ template <class T> void print(const T &x);
 inline void print(const char *x) { print(std::string(x)); }
 
 void *gen_function(char *name, char *signature, void *func_ptr);
+
+#define ASSERT(x)                                                              \
+  if (!(x)) {                                                                  \
+    print("ASSERT FAIL");                                                      \
+    print(#x);                                                                 \
+    print(__FUNCTION__);                                                       \
+  }

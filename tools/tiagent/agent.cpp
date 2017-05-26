@@ -332,35 +332,42 @@ public:
 };
 
 static std::mutex g_codetree_mutex;
-static IntervalMap<uint64_t, uint64_t> *g_ret_pc_range_to_native_func;
-static DenseMap<uint64_t, uint64_t> *g_ret_pc_to_native_func;
+static IntervalMap<uint64_t, void *> *g_ret_pc_range_to_native_func;
+static DenseMap<uint64_t, void *> *g_ret_pc_to_native_func;
+static DenseMap<void *, char *> *g_func_to_name;
 
 void *lookup_native_func() {
   std::lock_guard<std::mutex> lock(g_codetree_mutex);
   uint64_t ret_addr = (uint64_t)__builtin_return_address(0);
-  uint64_t native_func = g_ret_pc_to_native_func->lookup(ret_addr);
-  if (native_func != 0)
-    return reinterpret_cast<void *>(native_func);
-
-  native_func = g_ret_pc_range_to_native_func->lookup(ret_addr, 0);
-  if (native_func != 0)
-    g_ret_pc_to_native_func->insert({ret_addr, native_func});
-  return reinterpret_cast<void *>(native_func);
+  void *native_func = g_ret_pc_to_native_func->lookup(ret_addr);
+  if (native_func == nullptr) {
+    native_func = g_ret_pc_range_to_native_func->lookup(ret_addr, nullptr);
+    if (native_func != nullptr)
+      g_ret_pc_to_native_func->insert({ret_addr, native_func});
+  }
+  if (char *name = g_func_to_name->lookup(native_func)) {
+    print("called");
+    print(name);
+  }
+  return native_func;
 }
 
-void register_native_func(Codeblock block, void *native_func) {
+void register_native_func(const char *name, Codeblock block,
+                          void *native_func) {
   std::lock_guard<std::mutex> lock(g_codetree_mutex);
   g_ret_pc_range_to_native_func->insert((uint64_t)block.data(),
                                         ((uint64_t)block.data()) + block.size(),
-                                        (uint64_t)native_func);
+                                        native_func);
+  g_func_to_name->insert({native_func, strdup(name)});
 }
 
 class Codegen {
 public:
   Codegen() {
     g_ret_pc_range_to_native_func =
-        new IntervalMap<uint64_t, uint64_t>(allocator_);
-    g_ret_pc_to_native_func = new DenseMap<uint64_t, uint64_t>(10000);
+        new IntervalMap<uint64_t, void *>(allocator_);
+    g_ret_pc_to_native_func = new DenseMap<uint64_t, void *>(10000);
+    g_func_to_name = new DenseMap<void *, char *>(10000);
 
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
     llvm::sys::DynamicLibrary::AddSymbol(
@@ -371,6 +378,11 @@ public:
         "print", reinterpret_cast<void *>(print<char *>));
     llvm::sys::DynamicLibrary::AddSymbol(
         "lookup_native_func", reinterpret_cast<void *>(lookup_native_func));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "construct_jni_env", reinterpret_cast<void *>(construct_jni_env));
+    llvm::sys::DynamicLibrary::AddSymbol(
+        "destroy_jni_env", reinterpret_cast<void *>(destroy_jni_env));
+
     InitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
     LLVMInitializeNativeAsmParser();
@@ -393,8 +405,16 @@ public:
     auto ptr_to_ptr_func_type =
         FunctionType::get(Type::getInt8Ty(*context_)->getPointerTo(),
                           {Type::getInt8Ty(*context_)->getPointerTo()}, false);
+
     Function *wrap_ref = llvm::Function::Create(
         ptr_to_ptr_func_type, Function::ExternalLinkage, "wrap_ref", M);
+
+    Function *construct_jni_env =
+        llvm::Function::Create(ptr_to_ptr_func_type, Function::ExternalLinkage,
+                               "construct_jni_env", M);
+
+    Function *destroy_jni_env = llvm::Function::Create(
+        ptr_to_ptr_func_type, Function::ExternalLinkage, "destroy_jni_env", M);
 
     Function *unwrap_ref = llvm::Function::Create(
         ptr_to_ptr_func_type, Function::ExternalLinkage, "unwrap_ref", M);
@@ -413,7 +433,11 @@ public:
     }
 
     std::vector<Value *> values;
-    for (auto arg : args) {
+    // Handle JNIEnv pointer separately
+    Value *wrapped_jni_env = builder.CreateCall(construct_jni_env, {args[0]});
+    values.push_back(wrapped_jni_env);
+    for (size_t i = 1; i < args.size(); ++i) {
+      Argument *arg = args[i];
       if (arg->getType()->isPointerTy()) {
         values.push_back(builder.CreateCall(wrap_ref, {arg}));
       } else {
@@ -424,11 +448,14 @@ public:
     Value *func_value = builder.CreateCall(lookup_native_func, {});
     Value *ret = builder.CreateCall(func_value, values);
     if (func_type->getReturnType()->isVoidTy()) {
+      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
       builder.CreateRetVoid();
     } else if (func_type->getReturnType()->isPointerTy()) {
       ret = builder.CreateCall(unwrap_ref, {ret});
+      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
       builder.CreateRet(ret);
     } else {
+      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
       builder.CreateRet(ret);
     }
 
@@ -477,7 +504,7 @@ public:
     memory_manager_.finalizeMemory();
     memory_manager_.invalidateInstructionCache();
     Codeblock copy_block(new_block_mem, prototype_block.size());
-    register_native_func(copy_block, func_ptr);
+    register_native_func(name, copy_block, func_ptr);
 
     return (void *)new_block_mem;
   }
@@ -488,7 +515,7 @@ private:
   StringMap<Codeblock> signature_to_code_;
   SectionMemoryManager memory_manager_;
   std::string error_str;
-  IntervalMap<uint64_t, uint64_t>::Allocator allocator_;
+  IntervalMap<uint64_t, void *>::Allocator allocator_;
 };
 
 void *gen_function(char *name, char *signature, void *func_ptr) {
@@ -533,13 +560,29 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
   if (error != JNI_OK)
     return;
   {
-    void *f = gen_function(method_name_ptr, method_signature_ptr, address);
-    if (f) {
-      *new_address_ptr = f;
+    static const std::vector<std::string> blacklist{
+        "Ljava/lang",    "Ldalvik/system",      "Ljava/util",
+        "Llibcore/util", "Lorg/apache/harmony", "Lsun/misc/Unsafe"};
+    bool blacklisted = false;
+    for (const auto &prefix : blacklist) {
+      if (strncmp(class_signature_ptr, prefix.c_str(), prefix.size()) == 0) {
+        blacklisted = true;
+        break;
+      }
+    }
+    if (blacklisted) {
+      print("blacklisted");
+      print(class_signature_ptr);
+      print(method_name_ptr);
+    } else {
+      void *f = gen_function(method_name_ptr, method_signature_ptr, address);
+      if (f) {
+        *new_address_ptr = f;
+      }
     }
   }
 
-  jni_env->DeleteLocalRef(declaring_class);
+  jni_env->DeleteLocalRef(wrap_ref(declaring_class));
   ti->Deallocate((unsigned char *)method_name_ptr);
   ti->Deallocate((unsigned char *)method_signature_ptr);
   ti->Deallocate((unsigned char *)class_signature_ptr);
