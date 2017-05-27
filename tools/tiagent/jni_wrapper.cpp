@@ -8,6 +8,8 @@ static jvmtiEnv *ti;
 constexpr uint64_t kRefMask = 0; //(1ull << 62);
 constexpr uint64_t kMagicNumber = 0xBAADF00DBAADF00Dull;
 
+static jniNativeInterface *old_native_table;
+
 const jniNativeInterface *GetOverriddenJniTableMethods();
 
 void *unwrap_raw_ref(void *ref) {
@@ -25,46 +27,13 @@ void *wrap_raw_ref(void *ref) {
   return (void *)x;
 }
 
-struct JNIEnvWrapper : JNIEnv {
-  JNIEnv *real_env;
-  JNIEnvWrapper *previous_wrapper;
-  uint64_t magic_number;
-};
+// thread_local JNIEnvWrapper *current_wrapper = nullptr;
 
-thread_local JNIEnvWrapper *current_wrapper = nullptr;
+void enter_user_native_code(JNIEnv *env) {}
 
-JNIEnv *construct_jni_env(JNIEnv *env) {
-  JNIEnvWrapper *result = new JNIEnvWrapper;
-  result->functions = GetOverriddenJniTableMethods();
-  result->real_env = env;
-  result->previous_wrapper = current_wrapper;
-  result->magic_number = kMagicNumber;
-  current_wrapper = result;
-  return result;
-}
+void leave_user_native_code(JNIEnv *env) {}
 
-JNIEnvWrapper *extract_wrapper_env(JNIEnv *env) {
-  auto result = static_cast<JNIEnvWrapper *>(env);
-  ASSERT(result->magic_number == kMagicNumber);
-  return result;
-}
-
-JNIEnv *destroy_jni_env(JNIEnv *env) {
-  if (extract_wrapper_env(env) != current_wrapper) {
-    ASSERT(extract_wrapper_env(env) == current_wrapper);
-    return nullptr;
-  }
-  auto wrapper = current_wrapper;
-  current_wrapper = wrapper->previous_wrapper;
-  delete wrapper;
-  return current_wrapper;
-}
-
-JNIEnv *extract_real_env(JNIEnv *env) {
-  return extract_wrapper_env(env)->real_env;
-}
-
-std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, va_list args) {
+SmallVector<jvalue, 5> UnwrapAllArguments(jmethodID methodID, va_list args) {
   char *method_name_ptr = nullptr;
   char *method_signature_ptr = nullptr;
   jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
@@ -74,7 +43,7 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, va_list args) {
   ASSERT((bool)signature);
   ti->Deallocate((unsigned char *)method_name_ptr);
   ti->Deallocate((unsigned char *)method_signature_ptr);
-  std::vector<jvalue> result;
+  SmallVector<jvalue, 5> result;
   result.reserve(signature.getValue().arguments.size());
   for (auto type : signature.getValue().arguments) {
     jvalue value;
@@ -116,7 +85,8 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, va_list args) {
   return result;
 }
 
-std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
+SmallVector<jvalue, 5> UnwrapAllArguments(jmethodID methodID,
+                                          const jvalue *args) {
   char *method_name_ptr = nullptr;
   char *method_signature_ptr = nullptr;
   jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
@@ -126,7 +96,7 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   ASSERT((bool)signature);
   ti->Deallocate((unsigned char *)method_name_ptr);
   ti->Deallocate((unsigned char *)method_signature_ptr);
-  std::vector<jvalue> result;
+  SmallVector<jvalue, 5> result;
   result.reserve(signature.getValue().arguments.size());
   const jvalue *arg = args;
   for (auto type : signature.getValue().arguments) {
@@ -166,37 +136,34 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  ...) {                                        \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, methodID,                 \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj,                  \
                                     jmethodID methodID, va_list args) {        \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, methodID,                 \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj,                  \
                                     jmethodID methodID, const jvalue *args) {  \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, methodID,                 \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, methodID,               \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }
 
@@ -204,69 +171,66 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID,    \
                               ...) {                                           \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, methodID, unwrapperdArgs.data());  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  va_list args) {                               \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, methodID, unwrapperdArgs.data());  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  const jvalue *args) {                         \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, methodID, unwrapperdArgs.data());  \
+    old_native_table->MethodName##A(env, obj, methodID,                        \
+                                    unwrapperdArgs.data());                    \
   }
 
 #define DEFINE_NONVIRT_CALL_WITH_TYPE(RetType, MethodName)                     \
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, ...) {                    \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, clazz, methodID,          \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,    \
                                     jmethodID methodID, va_list args) {        \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, clazz, methodID,          \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,    \
                                     jmethodID methodID, const jvalue *args) {  \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, obj, clazz, methodID,          \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }
 
@@ -274,72 +238,66 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,          \
                               jmethodID methodID, ...) {                       \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, clazz, methodID,                   \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, va_list args) {           \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, clazz, methodID,                   \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, const jvalue *args) {     \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     clazz = unwrap_ref(clazz);                                                 \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, obj, clazz, methodID,                   \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
+                                    unwrapperdArgs.data());                    \
   }
 
 #define DEFINE_STATIC_CALL_WITH_TYPE(RetType, MethodName)                      \
   JNICALL RetType W_##MethodName(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, ...) {                    \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, clazz, methodID,               \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jclass clazz,                 \
                                     jmethodID methodID, va_list args) {        \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, clazz, methodID,               \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jclass clazz,                 \
                                     jmethodID methodID, const jvalue *args) {  \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     RetType result;                                                            \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    result = env->functions->MethodName##A(env, clazz, methodID,               \
-                                           unwrapperdArgs.data());             \
+    result = old_native_table->MethodName##A(env, clazz, methodID,             \
+                                             unwrapperdArgs.data());           \
     return WRAP(result);                                                       \
   }
 
@@ -347,42 +305,38 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   JNICALL void W_##MethodName(JNIEnv *env, jclass clazz, jmethodID methodID,   \
                               ...) {                                           \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, clazz, methodID,                        \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, va_list args) {           \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, clazz, methodID,                        \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, const jvalue *args) {     \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     auto unwrapperdArgs = UnwrapAllArguments(methodID, args);                  \
-    env->functions->MethodName##A(env, clazz, methodID,                        \
-                                  unwrapperdArgs.data());                      \
+    old_native_table->MethodName##A(env, clazz, methodID,                      \
+                                    unwrapperdArgs.data());                    \
   }
 
 #define DEFINE_FIELD_GETTER(FieldType, TypeName)                               \
   FieldType W_Get##TypeName##Field(JNIEnv *env, jobject obj,                   \
                                    jfieldID fieldID) {                         \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     FieldType result;                                                          \
-    result = env->functions->Get##TypeName##Field(env, obj, fieldID);          \
+    result = old_native_table->Get##TypeName##Field(env, obj, fieldID);        \
     return WRAP(result);                                                       \
   }
 
@@ -390,20 +344,19 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   void W_Set##TypeName##Field(JNIEnv *env, jobject obj, jfieldID fieldID,      \
                               FieldType val) {                                 \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     obj = unwrap_ref(obj);                                                     \
     val = UNWRAP(val);                                                         \
-    env->functions->Set##TypeName##Field(env, obj, fieldID, val);              \
+    old_native_table->Set##TypeName##Field(env, obj, fieldID, val);            \
   }
 
 #define DEFINE_STATIC_FIELD_GETTER(FieldType, TypeName)                        \
   FieldType W_GetStatic##TypeName##Field(JNIEnv *env, jclass clazz,            \
                                          jfieldID fieldID) {                   \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     FieldType result;                                                          \
-    result = env->functions->GetStatic##TypeName##Field(env, clazz, fieldID);  \
+    result =                                                                   \
+        old_native_table->GetStatic##TypeName##Field(env, clazz, fieldID);     \
     return WRAP(result);                                                       \
   }
 
@@ -411,17 +364,16 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   void W_SetStatic##TypeName##Field(JNIEnv *env, jclass clazz,                 \
                                     jfieldID fieldID, FieldType val) {         \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     clazz = unwrap_ref(clazz);                                                 \
     val = UNWRAP(val);                                                         \
-    env->functions->SetStatic##TypeName##Field(env, clazz, fieldID, val);      \
+    old_native_table->SetStatic##TypeName##Field(env, clazz, fieldID, val);    \
   }
 
 #define DEFINE_NEW_ARRAY(ArrayType, TypeName)                                  \
   ArrayType##Array W_New##TypeName##Array(JNIEnv *env, jsize len) {            \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
-    ArrayType##Array result = env->functions->New##TypeName##Array(env, len);  \
+    ArrayType##Array result =                                                  \
+        old_native_table->New##TypeName##Array(env, len);                      \
     return wrap_ref(result);                                                   \
   }
 
@@ -429,28 +381,25 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
   ArrayType *W_Get##TypeName##ArrayElements(                                   \
       JNIEnv *env, ArrayType##Array array, jboolean *isCopy) {                 \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     array = unwrap_ref(array);                                                 \
-    return env->functions->Get##TypeName##ArrayElements(env, array, isCopy);   \
+    return old_native_table->Get##TypeName##ArrayElements(env, array, isCopy); \
   }
 
 #define DEFINE_RELEASE_ARRAY_ELEMENTS(ArrayType, TypeName)                     \
   void W_Release##TypeName##ArrayElements(JNIEnv *env, ArrayType##Array array, \
                                           ArrayType *elems, jint mode) {       \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     array = unwrap_ref(array);                                                 \
-    return env->functions->Release##TypeName##ArrayElements(env, array, elems, \
-                                                            mode);             \
+    return old_native_table->Release##TypeName##ArrayElements(env, array,      \
+                                                              elems, mode);    \
   }
 
 #define DEFINE_GET_ARRAY_REGION(ArrayType, TypeName)                           \
   void W_Get##TypeName##ArrayRegion(JNIEnv *env, ArrayType##Array array,       \
                                     jsize start, jsize len, ArrayType *buf) {  \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     array = unwrap_ref(array);                                                 \
-    env->functions->Get##TypeName##ArrayRegion(env, array, start, len, buf);   \
+    old_native_table->Get##TypeName##ArrayRegion(env, array, start, len, buf); \
   }
 
 #define DEFINE_SET_ARRAY_REGION(ArrayType, TypeName)                           \
@@ -458,9 +407,8 @@ std::vector<jvalue> UnwrapAllArguments(jmethodID methodID, const jvalue *args) {
                                     jsize start, jsize len,                    \
                                     const ArrayType *buf) {                    \
     STATIC_PRINTER()                                                           \
-    env = extract_real_env(env);                                               \
     array = unwrap_ref(array);                                                 \
-    env->functions->Set##TypeName##ArrayRegion(env, array, start, len, buf);   \
+    old_native_table->Set##TypeName##ArrayRegion(env, array, start, len, buf); \
   }
 
 #define CALL(type, name)                                                       \
@@ -499,13 +447,12 @@ DEFINE_STATIC_VOID_CALL(CallStaticVoidMethod)
 JNICALL jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID,
                             ...) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
   va_list args;
   va_start(args, methodID);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
   jobject result =
-      env->functions->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   va_end(args);
   return wrap_ref(result);
 }
@@ -513,60 +460,54 @@ JNICALL jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID,
 JNICALL jobject W_NewObjectV(JNIEnv *env, jclass clazz, jmethodID methodID,
                              va_list args) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
   jobject result =
-      env->functions->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   return wrap_ref(result);
 }
 JNICALL jobject W_NewObjectA(JNIEnv *env, jclass clazz, jmethodID methodID,
                              const jvalue *args) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
   auto unwrapperdArgs = UnwrapAllArguments(methodID, args);
   jobject result =
-      env->functions->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
   return wrap_ref(result);
 }
 
 jclass W_DefineClass(JNIEnv *env, const char *name, jobject loader,
                      const jbyte *buf, jsize len) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   loader = unwrap_ref(loader);
-  auto result = env->functions->DefineClass(env, name, loader, buf, len);
+  auto result = old_native_table->DefineClass(env, name, loader, buf, len);
   return wrap_ref(result);
 }
 
 jclass W_FindClass(JNIEnv *env, const char *name) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
-  auto result = env->functions->FindClass(env, name);
+  auto result = old_native_table->FindClass(env, name);
   return wrap_ref(result);
 }
 
 jmethodID W_FromReflectedMethod(JNIEnv *env, jobject method) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   method = unwrap_ref(method);
-  return env->functions->FromReflectedMethod(env, method);
+  return old_native_table->FromReflectedMethod(env, method);
 }
 
 jfieldID W_FromReflectedField(JNIEnv *env, jobject field) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   field = unwrap_ref(field);
-  return env->functions->FromReflectedField(env, field);
+  return old_native_table->FromReflectedField(env, field);
 }
 
 jobject W_ToReflectedMethod(JNIEnv *env, jclass cls, jmethodID methodID,
                             jboolean isStatic) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   cls = unwrap_ref(cls);
-  auto result = env->functions->ToReflectedMethod(env, cls, methodID, isStatic);
+  auto result =
+      old_native_table->ToReflectedMethod(env, cls, methodID, isStatic);
   result = wrap_ref(result);
   return result;
 }
@@ -574,9 +515,8 @@ jobject W_ToReflectedMethod(JNIEnv *env, jclass cls, jmethodID methodID,
 jobject W_ToReflectedField(JNIEnv *env, jclass cls, jfieldID fieldID,
                            jboolean isStatic) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   cls = unwrap_ref(cls);
-  auto result = env->functions->ToReflectedField(env, cls, fieldID, isStatic);
+  auto result = old_native_table->ToReflectedField(env, cls, fieldID, isStatic);
   result = wrap_ref(result);
   return result;
 }
@@ -584,240 +524,207 @@ jobject W_ToReflectedField(JNIEnv *env, jclass cls, jfieldID fieldID,
 jmethodID W_GetMethodID(JNIEnv *env, jclass clazz, const char *name,
                         const char *sig) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->GetMethodID(env, clazz, name, sig);
+  return old_native_table->GetMethodID(env, clazz, name, sig);
 }
 
 jfieldID W_GetFieldID(JNIEnv *env, jclass clazz, const char *name,
                       const char *sig) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->GetFieldID(env, clazz, name, sig);
+  return old_native_table->GetFieldID(env, clazz, name, sig);
 }
 
 jmethodID W_GetStaticMethodID(JNIEnv *env, jclass clazz, const char *name,
                               const char *sig) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->GetStaticMethodID(env, clazz, name, sig);
+  return old_native_table->GetStaticMethodID(env, clazz, name, sig);
 }
 
 jfieldID W_GetStaticFieldID(JNIEnv *env, jclass clazz, const char *name,
                             const char *sig) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->GetStaticFieldID(env, clazz, name, sig);
+  return old_native_table->GetStaticFieldID(env, clazz, name, sig);
 }
 
 jclass W_GetSuperclass(JNIEnv *env, jclass sub) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   sub = unwrap_ref(sub);
-  auto result = env->functions->GetSuperclass(env, sub);
+  auto result = old_native_table->GetSuperclass(env, sub);
   result = wrap_ref(result);
   return result;
 }
 
 jboolean W_IsAssignableFrom(JNIEnv *env, jclass sub, jclass sup) {
   STATIC_PRINTER()
-  env = extract_real_env(env);
   sub = unwrap_ref(sub);
   sup = unwrap_ref(sup);
-  return env->functions->IsAssignableFrom(env, sub, sup);
+  return old_native_table->IsAssignableFrom(env, sub, sup);
 }
 
 jboolean W_IsSameObject(JNIEnv *env, jobject obj1, jobject obj2) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj1 = unwrap_ref(obj1);
   obj2 = unwrap_ref(obj2);
-  return env->functions->IsSameObject(env, obj1, obj2);
+  return old_native_table->IsSameObject(env, obj1, obj2);
 }
 
 jobject W_AllocObject(JNIEnv *env, jclass clazz) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  auto result = env->functions->AllocObject(env, clazz);
+  auto result = old_native_table->AllocObject(env, clazz);
   return wrap_ref(result);
 }
 
 jclass W_GetObjectClass(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  auto result = env->functions->GetObjectClass(env, obj);
+  auto result = old_native_table->GetObjectClass(env, obj);
   return wrap_ref(result);
 }
 
 jboolean W_IsInstanceOf(JNIEnv *env, jobject obj, jclass clazz) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
   clazz = unwrap_ref(clazz);
-  return env->functions->IsInstanceOf(env, obj, clazz);
+  return old_native_table->IsInstanceOf(env, obj, clazz);
 }
 
 jobjectArray W_NewObjectArray(JNIEnv *env, jsize len, jclass clazz,
                               jobject init) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
   init = unwrap_ref(init);
-  auto result = env->functions->NewObjectArray(env, len, clazz, init);
+  auto result = old_native_table->NewObjectArray(env, len, clazz, init);
   return wrap_ref(result);
 }
 
 jobject W_GetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   array = unwrap_ref(array);
-  auto result = env->functions->GetObjectArrayElement(env, array, index);
+  auto result = old_native_table->GetObjectArrayElement(env, array, index);
   return wrap_ref(result);
 }
 
 void W_SetObjectArrayElement(JNIEnv *env, jobjectArray array, jsize index,
                              jobject val) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   array = unwrap_ref(array);
   val = unwrap_ref(val);
-  env->functions->SetObjectArrayElement(env, array, index, val);
+  old_native_table->SetObjectArrayElement(env, array, index, val);
 }
 
 jint W_Throw(JNIEnv *env, jthrowable obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  return env->functions->Throw(env, obj);
+  return old_native_table->Throw(env, obj);
 }
 
 jint W_ThrowNew(JNIEnv *env, jclass clazz, const char *msg) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->ThrowNew(env, clazz, msg);
+  return old_native_table->ThrowNew(env, clazz, msg);
 }
 
 jthrowable W_ExceptionOccurred(JNIEnv *env) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  auto result = env->functions->ExceptionOccurred(env);
+  auto result = old_native_table->ExceptionOccurred(env);
   return result;
 }
 
 jint W_PushLocalFrame(JNIEnv *env, jint capacity) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  return env->functions->PushLocalFrame(env, capacity);
+  return old_native_table->PushLocalFrame(env, capacity);
 }
 
 jobject W_PopLocalFrame(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  auto result = env->functions->PopLocalFrame(env, obj);
+  auto result = old_native_table->PopLocalFrame(env, obj);
   return wrap_ref(result);
 }
 jint W_EnsureLocalCapacity(JNIEnv *env, jint capacity) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  return env->functions->EnsureLocalCapacity(env, capacity);
+  return old_native_table->EnsureLocalCapacity(env, capacity);
 }
 jobject W_NewGlobalRef(JNIEnv *env, jobject lobj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   lobj = unwrap_ref(lobj);
-  auto result = env->functions->NewGlobalRef(env, lobj);
+  auto result = old_native_table->NewGlobalRef(env, lobj);
   return wrap_ref(result);
 }
 
 void W_DeleteGlobalRef(JNIEnv *env, jobject gref) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   gref = unwrap_ref(gref);
-  env->functions->DeleteGlobalRef(env, gref);
+  old_native_table->DeleteGlobalRef(env, gref);
 }
 
 void W_DeleteLocalRef(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  env->functions->DeleteLocalRef(env, obj);
+  old_native_table->DeleteLocalRef(env, obj);
 }
 
 jobject W_NewLocalRef(JNIEnv *env, jobject ref) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   ref = unwrap_ref(ref);
-  auto result = env->functions->NewLocalRef(env, ref);
+  auto result = old_native_table->NewLocalRef(env, ref);
   return wrap_ref(result);
 }
 
 jstring W_NewString(JNIEnv *env, const jchar *unicode, jsize len) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  auto result = env->functions->NewString(env, unicode, len);
+  auto result = old_native_table->NewString(env, unicode, len);
   return wrap_ref(result);
 }
 jsize W_GetStringLength(JNIEnv *env, jstring str) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  return env->functions->GetStringLength(env, str);
+  return old_native_table->GetStringLength(env, str);
 }
 const jchar *W_GetStringChars(JNIEnv *env, jstring str, jboolean *isCopy) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  return env->functions->GetStringChars(env, str, isCopy);
+  return old_native_table->GetStringChars(env, str, isCopy);
 }
 void W_ReleaseStringChars(JNIEnv *env, jstring str, const jchar *chars) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  env->functions->ReleaseStringChars(env, str, chars);
+  old_native_table->ReleaseStringChars(env, str, chars);
 }
 
 jstring W_NewStringUTF(JNIEnv *env, const char *utf) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  auto result = env->functions->NewStringUTF(env, utf);
+  auto result = old_native_table->NewStringUTF(env, utf);
   return wrap_ref(result);
 }
 jsize W_GetStringUTFLength(JNIEnv *env, jstring str) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  return env->functions->GetStringUTFLength(env, str);
+  return old_native_table->GetStringUTFLength(env, str);
 }
 const char *W_GetStringUTFChars(JNIEnv *env, jstring str, jboolean *isCopy) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  return env->functions->GetStringUTFChars(env, str, isCopy);
+  return old_native_table->GetStringUTFChars(env, str, isCopy);
 }
 void W_ReleaseStringUTFChars(JNIEnv *env, jstring str, const char *chars) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  env->functions->ReleaseStringUTFChars(env, str, chars);
+  old_native_table->ReleaseStringUTFChars(env, str, chars);
 }
 
 jsize W_GetArrayLength(JNIEnv *env, jarray array) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   array = unwrap_ref(array);
-  return env->functions->GetArrayLength(env, array);
+  return old_native_table->GetArrayLength(env, array);
 }
 jint W_RegisterNatives(JNIEnv *env, jclass clazz,
                        const JNINativeMethod *methods, jint nMethods) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
   std::vector<JNINativeMethod> new_methods(nMethods);
   for (int i = 0; i < nMethods; ++i) {
@@ -828,136 +735,115 @@ jint W_RegisterNatives(JNIEnv *env, jclass clazz,
     //                                     methods[i].fnPtr);
     new_methods[i].fnPtr = methods[i].fnPtr;
   }
-  return env->functions->RegisterNatives(env, clazz, new_methods.data(),
-                                         nMethods);
+  return old_native_table->RegisterNatives(env, clazz, new_methods.data(),
+                                           nMethods);
 }
 jint W_UnregisterNatives(JNIEnv *env, jclass clazz) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   clazz = unwrap_ref(clazz);
-  return env->functions->UnregisterNatives(env, clazz);
+  return old_native_table->UnregisterNatives(env, clazz);
 }
 
 jint W_MonitorEnter(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  return env->functions->MonitorEnter(env, obj);
+  return old_native_table->MonitorEnter(env, obj);
 }
 jint W_MonitorExit(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  return env->functions->MonitorExit(env, obj);
+  return old_native_table->MonitorExit(env, obj);
 }
 
 void W_GetStringRegion(JNIEnv *env, jstring str, jsize start, jsize len,
                        jchar *buf) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  env->functions->GetStringRegion(env, str, start, len, buf);
+  old_native_table->GetStringRegion(env, str, start, len, buf);
 }
 void W_GetStringUTFRegion(JNIEnv *env, jstring str, jsize start, jsize len,
                           char *buf) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  env->functions->GetStringUTFRegion(env, str, start, len, buf);
+  old_native_table->GetStringUTFRegion(env, str, start, len, buf);
 }
 
 void *W_GetPrimitiveArrayCritical(JNIEnv *env, jarray array, jboolean *isCopy) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   array = unwrap_ref(array);
-  return env->functions->GetPrimitiveArrayCritical(env, array, isCopy);
+  return old_native_table->GetPrimitiveArrayCritical(env, array, isCopy);
 }
 void W_ReleasePrimitiveArrayCritical(JNIEnv *env, jarray array, void *carray,
                                      jint mode) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   array = unwrap_ref(array);
-  env->functions->ReleasePrimitiveArrayCritical(env, array, carray, mode);
+  old_native_table->ReleasePrimitiveArrayCritical(env, array, carray, mode);
 }
 
 const jchar *W_GetStringCritical(JNIEnv *env, jstring str, jboolean *isCopy) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  return env->functions->GetStringCritical(env, str, isCopy);
+  return old_native_table->GetStringCritical(env, str, isCopy);
 }
 void W_ReleaseStringCritical(JNIEnv *env, jstring str, const jchar *cstring) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   str = unwrap_ref(str);
-  env->functions->ReleaseStringCritical(env, str, cstring);
+  old_native_table->ReleaseStringCritical(env, str, cstring);
 }
 
 jweak W_NewWeakGlobalRef(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  return env->functions->NewWeakGlobalRef(env, obj);
+  return old_native_table->NewWeakGlobalRef(env, obj);
 }
 void W_DeleteWeakGlobalRef(JNIEnv *env, jweak ref) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  env->functions->DeleteWeakGlobalRef(env, ref);
+  old_native_table->DeleteWeakGlobalRef(env, ref);
 }
 
 jobject W_NewDirectByteBuffer(JNIEnv *env, void *address, jlong capacity) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  auto result = env->functions->NewDirectByteBuffer(env, address, capacity);
+  auto result = old_native_table->NewDirectByteBuffer(env, address, capacity);
   return wrap_ref(result);
 }
 void *W_GetDirectBufferAddress(JNIEnv *env, jobject buf) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   buf = unwrap_ref(buf);
-  return env->functions->GetDirectBufferAddress(env, buf);
+  return old_native_table->GetDirectBufferAddress(env, buf);
 }
 jlong W_GetDirectBufferCapacity(JNIEnv *env, jobject buf) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   buf = unwrap_ref(buf);
-  return env->functions->GetDirectBufferCapacity(env, buf);
+  return old_native_table->GetDirectBufferCapacity(env, buf);
 }
 jobjectRefType W_GetObjectRefType(JNIEnv *env, jobject obj) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
   obj = unwrap_ref(obj);
-  return env->functions->GetObjectRefType(env, obj);
+  return old_native_table->GetObjectRefType(env, obj);
 }
 jint W_GetVersion(JNIEnv *env) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  return env->functions->GetVersion(env);
+  return old_native_table->GetVersion(env);
 }
 void W_ExceptionDescribe(JNIEnv *env) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  env->functions->ExceptionDescribe(env);
+  old_native_table->ExceptionDescribe(env);
 }
 void W_ExceptionClear(JNIEnv *env) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  env->functions->ExceptionClear(env);
+  old_native_table->ExceptionClear(env);
 }
 void W_FatalError(JNIEnv *env, const char *msg) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  env->functions->FatalError(env, msg);
+  old_native_table->FatalError(env, msg);
 }
 jint W_GetJavaVM(JNIEnv *env, JavaVM **vm) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  return env->functions->GetJavaVM(env, vm);
+  return old_native_table->GetJavaVM(env, vm);
 }
 jboolean W_ExceptionCheck(JNIEnv *env) {
   STATIC_PRINTER();
-  env = extract_real_env(env);
-  return env->functions->ExceptionCheck(env);
+  return old_native_table->ExceptionCheck(env);
 }
 
 const jniNativeInterface *GetOverriddenJniTableMethods() {
@@ -1202,6 +1088,14 @@ jvmtiError RegisterNewJniTable(jvmtiEnv *tiEnv) {
   ti = tiEnv;
   if (ti == nullptr)
     return JVMTI_ERROR_INVALID_OBJECT;
+
+  jvmtiError error = ti->GetJNIFunctionTable(&old_native_table);
+  if (error != JNI_OK)
+    return error;
+
+  error = ti->SetJNIFunctionTable(GetOverriddenJniTableMethods());
+  if (error != JNI_OK)
+    return error;
 
   return JVMTI_ERROR_NONE;
 }

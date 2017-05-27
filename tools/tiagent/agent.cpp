@@ -379,9 +379,11 @@ public:
     llvm::sys::DynamicLibrary::AddSymbol(
         "lookup_native_func", reinterpret_cast<void *>(lookup_native_func));
     llvm::sys::DynamicLibrary::AddSymbol(
-        "construct_jni_env", reinterpret_cast<void *>(construct_jni_env));
+        "enter_user_native_code",
+        reinterpret_cast<void *>(enter_user_native_code));
     llvm::sys::DynamicLibrary::AddSymbol(
-        "destroy_jni_env", reinterpret_cast<void *>(destroy_jni_env));
+        "leave_user_native_code",
+        reinterpret_cast<void *>(leave_user_native_code));
 
     InitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
@@ -406,15 +408,20 @@ public:
         FunctionType::get(Type::getInt8Ty(*context_)->getPointerTo(),
                           {Type::getInt8Ty(*context_)->getPointerTo()}, false);
 
+    auto ptr_to_void_func_type =
+        FunctionType::get(Type::getVoidTy(*context_),
+                          {Type::getInt8Ty(*context_)->getPointerTo()}, false);
+
     Function *wrap_ref = llvm::Function::Create(
         ptr_to_ptr_func_type, Function::ExternalLinkage, "wrap_ref", M);
 
-    Function *construct_jni_env =
-        llvm::Function::Create(ptr_to_ptr_func_type, Function::ExternalLinkage,
-                               "construct_jni_env", M);
+    Function *enter_user_native_code =
+        llvm::Function::Create(ptr_to_void_func_type, Function::ExternalLinkage,
+                               "enter_user_native_code", M);
 
-    Function *destroy_jni_env = llvm::Function::Create(
-        ptr_to_ptr_func_type, Function::ExternalLinkage, "destroy_jni_env", M);
+    Function *leave_user_native_code =
+        llvm::Function::Create(ptr_to_void_func_type, Function::ExternalLinkage,
+                               "leave_user_native_code", M);
 
     Function *unwrap_ref = llvm::Function::Create(
         ptr_to_ptr_func_type, Function::ExternalLinkage, "unwrap_ref", M);
@@ -434,8 +441,9 @@ public:
 
     std::vector<Value *> values;
     // Handle JNIEnv pointer separately
-    Value *wrapped_jni_env = builder.CreateCall(construct_jni_env, {args[0]});
-    values.push_back(wrapped_jni_env);
+    Value *jni_env = args[0];
+    values.push_back(jni_env);
+
     for (size_t i = 1; i < args.size(); ++i) {
       Argument *arg = args[i];
       if (arg->getType()->isPointerTy()) {
@@ -445,17 +453,18 @@ public:
       }
     }
 
+    builder.CreateCall(enter_user_native_code, {jni_env});
     Value *func_value = builder.CreateCall(lookup_native_func, {});
     Value *ret = builder.CreateCall(func_value, values);
     if (func_type->getReturnType()->isVoidTy()) {
-      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
+      builder.CreateCall(leave_user_native_code, {jni_env});
       builder.CreateRetVoid();
     } else if (func_type->getReturnType()->isPointerTy()) {
       ret = builder.CreateCall(unwrap_ref, {ret});
-      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
+      builder.CreateCall(leave_user_native_code, {jni_env});
       builder.CreateRet(ret);
     } else {
-      builder.CreateCall(destroy_jni_env, {wrapped_jni_env});
+      builder.CreateCall(leave_user_native_code, {jni_env});
       builder.CreateRet(ret);
     }
 

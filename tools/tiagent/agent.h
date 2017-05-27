@@ -19,7 +19,7 @@ enum class JavaType : uint8_t {
 };
 
 struct MethodSignature {
-  llvm::SmallVector<JavaType, 5> arguments;
+  llvm::SmallVector<JavaType, 8> arguments;
   JavaType return_type;
 };
 

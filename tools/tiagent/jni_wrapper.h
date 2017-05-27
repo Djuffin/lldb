@@ -13,7 +13,8 @@ template <class T> inline T *wrap_ref(T *ref) {
   return (T *)wrap_raw_ref((void *)ref);
 }
 
-JNIEnv *construct_jni_env(JNIEnv *env);
-JNIEnv *destroy_jni_env(JNIEnv *env);
+void enter_user_native_code(JNIEnv *env);
+
+void leave_user_native_code(JNIEnv *env);
 
 jvmtiError RegisterNewJniTable(jvmtiEnv *ti);
