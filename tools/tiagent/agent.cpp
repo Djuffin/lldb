@@ -59,6 +59,104 @@
 using namespace llvm;
 using namespace llvm::orc;
 
+
+struct ModuleSO {
+  std::string name;
+  uint64_t start_address = 0;
+  uint64_t end_address = 0;
+  bool is_system = false;
+};
+
+std::vector<ModuleSO> ReadProcessModules()
+{
+// /proc/self/map usually looks like this:
+// <address>      <perms> <offset> <dev> <inode>     <pathname>
+//
+// 7e0d0d8000-7e0d0d9000 ---p 00000000 00:00 0
+// 7e0d0d9000-7e0d0da000 r--p 00015000 fd:00 2231    /system/lib64/libselinux.so
+// 7e0d0da000-7e0d0db000 rw-p 00016000 fd:00 2231    /system/lib64/libselinux.so
+// 7e0d0db000-7e0d0dc000 rw-p 00000000 00:00 0       [anon:.bss]
+// 7e0d12b000-7e0d13b000 r-xp 00000000 fd:00 2090    /system/lib64/libcutils.so
+// 7e0d13b000-7e0d13d000 r--p 0000f000 fd:00 2090    /system/lib64/libcutils.so
+// 7e0d13d000-7e0d13e000 rw-p 00011000 fd:00 2090    /system/lib64/libcutils.so
+// 7e0d172000-7e0d174000 r-xp 00000000 fd:00 2096    /system/lib64/libdl.so
+// 7e0d174000-7e0d175000 r--p 00001000 fd:00 2096    /system/lib64/libdl.so
+// 7e0d175000-7e0d176000 rw-p 00002000 fd:00 2096    /system/lib64/libdl.so
+// 7e0d176000-7e0d177000 rw-p 00000000 00:00 0       [anon:.bss]
+// 7e0d1a9000-7e0d26c000 r-xp 00000000 fd:00 2073    /system/lib64/libc.so
+// 7e0d26c000-7e0d26d000 ---p 00000000 00:00 0
+// 7e0d26d000-7e0d273000 r--p 000c3000 fd:00 2073    /system/lib64/libc.so
+
+  std::vector<ModuleSO> result;
+  FILE *maps_file = fopen("/proc/self/maps", "r");
+  if (maps_file == nullptr)
+    return result;
+  char *line_buffer = nullptr;
+  size_t line_length = 0;
+  int count = 0;
+  ssize_t read;
+
+  while ((read = getline(&line_buffer, &line_length, maps_file)) != -1) {
+    void *start_address;
+    void *end_address;
+    void *offset;
+    int dev1, dev2, inode;
+    std::vector<char> module_name_buf(line_length, '\0');
+    if (sscanf(line_buffer, "%p-%p %*[-rwxsp] %p %x:%x %d %s\n", &start_address,
+               &end_address, &offset, &dev1, &dev2, &inode,
+               module_name_buf.data()) == 7) {
+      ModuleSO module;
+      module.name.append(module_name_buf.data());
+      module.start_address = (uint64_t)start_address;
+      module.end_address = (uint64_t)end_address;
+      result.push_back(module);
+    }
+  }
+  free(line_buffer);
+  fclose(maps_file);
+  return result;
+}
+
+bool IsSystemFunction(void *fp) {
+  static std::mutex g_mutex;
+  std::lock_guard<std::mutex> lock(g_mutex);
+
+  typedef IntervalMap<uint64_t, ModuleSO *> PtrIntervalMap;
+  static PtrIntervalMap::Allocator g_allocator_;
+  static PtrIntervalMap g_ptr_range_to_module(g_allocator_);
+  static std::vector<ModuleSO> g_modules;
+  constexpr char kSystemLibDir[] = "/system/lib";
+
+  if (fp == nullptr) return true;
+  uint64_t fp_address = (uint64_t)fp;
+
+  ModuleSO *module = g_ptr_range_to_module.lookup(fp_address, nullptr);
+  if (module == nullptr) {
+    // Function not found, try rebuilding module map.
+    g_ptr_range_to_module.clear();
+    g_modules.clear();
+    g_modules = ReadProcessModules();
+
+    for (auto &m : g_modules) {
+      if (m.name.find(kSystemLibDir, 0) == 0) {
+        m.is_system = true;
+      }
+      // +1 / -1 to make the intervals non-intersecting
+      // IntervalMap can't work otherwise
+      g_ptr_range_to_module.insert(m.start_address + 1,
+                                   m.end_address - 1,
+                                   &m);
+    }
+  }
+  module = g_ptr_range_to_module.lookup(fp_address, nullptr);
+  if (module == nullptr) {
+    print("function from unknown module");
+    // Module not found, assume system module;
+    return true;
+  }
+  return module->is_system;
+}
+
 SmallString<8> SignatureToShortString(const MethodSignature &sig) {
   auto get_type_char = [](JavaType type) -> char {
     switch (type) {
@@ -569,16 +667,8 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
   if (error != JNI_OK)
     return;
   {
-    static const std::vector<std::string> blacklist{
-        "Ljava/lang",    "Ldalvik/system",      "Ljava/util",
-        "Llibcore/util", "Lorg/apache/harmony", "Lsun/misc/Unsafe"};
     bool blacklisted = false;
-    for (const auto &prefix : blacklist) {
-      if (strncmp(class_signature_ptr, prefix.c_str(), prefix.size()) == 0) {
-        blacklisted = true;
-        break;
-      }
-    }
+    blacklisted = IsSystemFunction(address);
     if (blacklisted) {
       print("blacklisted");
       print(class_signature_ptr);

@@ -27,6 +27,7 @@ void *wrap_raw_ref(void *ref) {
   return (void *)x;
 }
 
+
 // thread_local JNIEnvWrapper *current_wrapper = nullptr;
 
 void enter_user_native_code(JNIEnv *env) {}
