@@ -125,7 +125,8 @@ bool IsSystemFunction(void *fp) {
   static PtrIntervalMap::Allocator g_allocator_;
   static PtrIntervalMap g_ptr_range_to_module(g_allocator_);
   static std::vector<ModuleSO> g_modules;
-  constexpr char kSystemLibDir[] = "/system/lib";
+  constexpr char kSystemDir[] = "/system/";
+  constexpr char kTiAgentName[] = "/libtiagent.so";
 
   if (fp == nullptr) return true;
   uint64_t fp_address = (uint64_t)fp;
@@ -138,11 +139,12 @@ bool IsSystemFunction(void *fp) {
     g_modules = ReadProcessModules();
 
     for (auto &m : g_modules) {
-      if (m.name.find(kSystemLibDir, 0) == 0) {
+      if (m.name.find(kSystemDir) == 0 ||
+          m.name.find(kTiAgentName) != std::string::npos) {
         m.is_system = true;
       }
       // +1 / -1 to make the intervals non-intersecting
-      // IntervalMap can't work otherwise
+      // IntervalMap can't work otherwise.
       g_ptr_range_to_module.insert(m.start_address + 1,
                                    m.end_address - 1,
                                    &m);
@@ -681,7 +683,7 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
     }
   }
 
-  jni_env->DeleteLocalRef(wrap_ref(declaring_class));
+  jni_env->DeleteLocalRef(declaring_class);
   ti->Deallocate((unsigned char *)method_name_ptr);
   ti->Deallocate((unsigned char *)method_signature_ptr);
   ti->Deallocate((unsigned char *)class_signature_ptr);

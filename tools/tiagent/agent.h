@@ -32,6 +32,8 @@ llvm::FunctionType *
 ConvertSignatureToFunctionType(const MethodSignature &signature,
                                llvm::LLVMContext &context);
 
+bool IsSystemFunction(void *fp);
+
 template <class T> void print(const T &x);
 
 inline void print(const char *x) { print(std::string(x)); }
