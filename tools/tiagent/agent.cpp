@@ -93,9 +93,7 @@ std::vector<ModuleSO> ReadProcessModules()
     return result;
   char *line_buffer = nullptr;
   size_t line_length = 0;
-  int count = 0;
   ssize_t read;
-
   while ((read = getline(&line_buffer, &line_length, maps_file)) != -1) {
     void *start_address;
     void *end_address;
@@ -466,8 +464,8 @@ public:
   Codegen() {
     g_ret_pc_range_to_native_func =
         new IntervalMap<uint64_t, void *>(allocator_);
-    g_ret_pc_to_native_func = new DenseMap<uint64_t, void *>(10000);
-    g_func_to_name = new DenseMap<void *, char *>(10000);
+    g_ret_pc_to_native_func = new DenseMap<uint64_t, void *>(1000);
+    g_func_to_name = new DenseMap<void *, char *>(1000);
 
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
     llvm::sys::DynamicLibrary::AddSymbol(
@@ -669,13 +667,8 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
   if (error != JNI_OK)
     return;
   {
-    bool blacklisted = false;
-    blacklisted = IsSystemFunction(address);
-    if (blacklisted) {
-      print("blacklisted");
-      print(class_signature_ptr);
-      print(method_name_ptr);
-    } else {
+    bool blacklisted = IsSystemFunction(address);
+    if (!blacklisted) {
       void *f = gen_function(method_name_ptr, method_signature_ptr, address);
       if (f) {
         *new_address_ptr = f;

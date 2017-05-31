@@ -1,5 +1,6 @@
 #include "jni_wrapper.h"
 #include "agent.h"
+#include <mutex>
 
 using namespace llvm;
 
@@ -46,20 +47,36 @@ void enter_user_native_code(JNIEnv *env) {}
 
 void leave_user_native_code(JNIEnv *env) {}
 
+const MethodSignature *GetMethodSignature(jmethodID methodID) {
+  static std::mutex g_mutex;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  static DenseMap<void *, MethodSignature *> g_id_to_signature(1000);
+  void *voidMethodID = (void *)methodID;
+  MethodSignature *sig_ptr = g_id_to_signature.lookup(voidMethodID);
+  if (sig_ptr == nullptr) {
+    char *method_name_ptr = nullptr;
+    char *method_signature_ptr = nullptr;
+    jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
+                                         &method_signature_ptr, nullptr);
+    ASSERT(error == JNI_OK);
+    auto signature = ParseJavaSignature(method_signature_ptr);
+    ti->Deallocate((unsigned char *)method_name_ptr);
+    ti->Deallocate((unsigned char *)method_signature_ptr);
+    if (signature) {
+      sig_ptr = new MethodSignature(signature.getValue());
+      g_id_to_signature.insert({voidMethodID, sig_ptr});
+    }
+  }
+  return sig_ptr;
+}
+
 SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
                                           va_list args) {
-  char *method_name_ptr = nullptr;
-  char *method_signature_ptr = nullptr;
-  jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
-                                       &method_signature_ptr, nullptr);
-  ASSERT(error == JNI_OK);
-  auto signature = ParseJavaSignature(method_signature_ptr);
-  ASSERT((bool)signature);
-  ti->Deallocate((unsigned char *)method_name_ptr);
-  ti->Deallocate((unsigned char *)method_signature_ptr);
+  const MethodSignature *signature = GetMethodSignature(methodID);
+  ASSERT(signature != nullptr);
   SmallVector<jvalue, 5> result;
-  result.reserve(signature.getValue().arguments.size());
-  for (auto type : signature.getValue().arguments) {
+  result.reserve(signature->arguments.size());
+  for (auto type : signature->arguments) {
     jvalue value;
     switch (type) {
     case JavaType::jvoid:
@@ -101,19 +118,12 @@ SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
 
 SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
                                           const jvalue *args) {
-  char *method_name_ptr = nullptr;
-  char *method_signature_ptr = nullptr;
-  jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
-                                       &method_signature_ptr, nullptr);
-  ASSERT(error == JNI_OK);
-  auto signature = ParseJavaSignature(method_signature_ptr);
-  ASSERT((bool)signature);
-  ti->Deallocate((unsigned char *)method_name_ptr);
-  ti->Deallocate((unsigned char *)method_signature_ptr);
+  const MethodSignature *signature = GetMethodSignature(methodID);
+  ASSERT(signature != nullptr);
   SmallVector<jvalue, 5> result;
-  result.reserve(signature.getValue().arguments.size());
   const jvalue *arg = args;
-  for (auto type : signature.getValue().arguments) {
+  result.reserve(signature->arguments.size());
+  for (auto type : signature->arguments) {
     jvalue value;
     switch (type) {
     case JavaType::jvoid:
@@ -147,8 +157,10 @@ SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
   }
 
 #define JNI_WRAPPER_HEADER()                                                   \
-  PRINT_FUNCTION()                                                             \
-  RefWrapper RW(__builtin_return_address(0));
+  RefWrapper RW(__builtin_return_address(0));                                  \
+  if (!RW.is_system) {                                                         \
+    PRINT_FUNCTION()                                                           \
+  }
 
 #define DEFINE_CALL_WITH_TYPE(RetType, MethodName)                             \
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, \
@@ -744,17 +756,7 @@ jint W_RegisterNatives(JNIEnv *env, jclass clazz,
                        const JNINativeMethod *methods, jint nMethods) {
   JNI_WRAPPER_HEADER();
   clazz = RW.unwrap_ref(clazz);
-  std::vector<JNINativeMethod> new_methods(nMethods);
-  for (int i = 0; i < nMethods; ++i) {
-    new_methods[i].name = methods[i].name;
-    new_methods[i].signature = methods[i].signature;
-    // new_methods[i].fnPtr = gen_function(methods[i].name,
-    //                                     methods[i].signature,
-    //                                     methods[i].fnPtr);
-    new_methods[i].fnPtr = methods[i].fnPtr;
-  }
-  return old_native_table->RegisterNatives(env, clazz, new_methods.data(),
-                                           nMethods);
+  return old_native_table->RegisterNatives(env, clazz, methods, nMethods);
 }
 jint W_UnregisterNatives(JNIEnv *env, jclass clazz) {
   JNI_WRAPPER_HEADER();
