@@ -310,18 +310,17 @@ llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
   return result;
 };
 
-#define LOG_PREFIX "/data/data/com.eugene.sum/"
-static std::mutex g_print_mutex;
-template <class T> void print(const T &x) {
+void print(const char *fmt, ...) {
+  static std::mutex g_print_mutex;
   std::lock_guard<std::mutex> lock(g_print_mutex);
-  std::error_code EC;
-  raw_fd_ostream file_stream(LOG_PREFIX "debug_log.txt", EC, sys::fs::F_Append);
-  file_stream << x << "\n";
-  file_stream.close();
-}
 
-template void print<int>(const int &);
-template void print<uint64_t>(const uint64_t &);
+  FILE *f = fopen("/data/local/tmp/agent_log.txt", "a+");
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(f, fmt, args);
+  fclose(f);
+  va_end(args);
+}
 
 bool IsDebuggerPresent() {
   char buf[1024];
@@ -343,7 +342,6 @@ bool IsDebuggerPresent() {
       debugger_present = (atoi(tracer_pid + sizeof(TracerPid) - 1) != 0);
   }
   close(status_fd);
-  print(buf);
 
   return debugger_present;
 }
@@ -352,12 +350,12 @@ typedef ArrayRef<uint8_t> Codeblock;
 
 class SectionMemoryManagerWrapper : public SectionMemoryManager {
   SectionMemoryManager &SM;
-  std::function<void(Codeblock)> report_alloc_;
+  Codeblock &last_codeblock_ptr_;
 
 public:
   SectionMemoryManagerWrapper(SectionMemoryManager &sm,
-                              std::function<void(Codeblock)> report)
-      : SM(sm), report_alloc_(std::move(report)) {}
+                              Codeblock &last_codeblock_ptr)
+      : SM(sm), last_codeblock_ptr_(last_codeblock_ptr) {}
 
   SectionMemoryManagerWrapper(const SectionMemoryManagerWrapper &) = delete;
   void operator=(const SectionMemoryManagerWrapper &) = delete;
@@ -368,7 +366,7 @@ public:
                                StringRef SectionName) override {
     auto result =
         SM.allocateCodeSection(Size, Alignment, SectionID, SectionName);
-    report_alloc_(Codeblock(result, Size));
+    last_codeblock_ptr_ = Codeblock(result, Size);
     return result;
   }
 
@@ -392,18 +390,28 @@ class LlvmJit {
 private:
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  RTDyldObjectLinkingLayer<> ObjectLayer;
-  IRCompileLayer<decltype(ObjectLayer)> CompileLayer;
+  RTDyldObjectLinkingLayer ObjectLayer;
+  IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
+  Codeblock last_codeblock_;
+  SectionMemoryManager memory_manager_;
 
 public:
   LlvmJit()
       : TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
+        ObjectLayer([this]() {
+            return std::make_shared<SectionMemoryManagerWrapper>(
+              memory_manager_, last_codeblock_);
+        }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {}
 
   TargetMachine &getTargetMachine() { return *TM; }
 
-  void addModule(std::unique_ptr<Module> M,
-                 std::unique_ptr<SectionMemoryManagerWrapper> MM) {
+  SectionMemoryManager& getSectionMemoryManager() { return memory_manager_; }
+  Codeblock getLastCodeBlock() { return last_codeblock_; }
+
+  using ModuleHandle = decltype(CompileLayer)::ModuleHandleT;
+
+  ModuleHandle addModule(std::unique_ptr<Module> M) {
     auto Resolver = createLambdaResolver(
         [&](const std::string &Name) {
           if (auto Sym = CompileLayer.findSymbol(Name, false))
@@ -412,16 +420,15 @@ public:
         },
         [](const std::string &Name) {
           if (auto SymAddr =
-                  RTDyldMemoryManager::getSymbolAddressInProcess(Name))
+                RTDyldMemoryManager::getSymbolAddressInProcess(Name))
             return JITSymbol(SymAddr, JITSymbolFlags::Exported);
           return JITSymbol(nullptr);
         });
 
-    std::vector<std::unique_ptr<Module>> Ms;
-    Ms.push_back(std::move(M));
-
-    CompileLayer.addModuleSet(std::move(Ms), std::move(MM),
-                              std::move(Resolver));
+    // Add the set to the JIT with the resolver we created above and a newly
+    // created SectionMemoryManager.
+    return cantFail(CompileLayer.addModule(std::move(M),
+                                           std::move(Resolver)));
   }
 
   JITSymbol findSymbol(const std::string &name) {
@@ -444,8 +451,7 @@ void *lookup_native_func() {
       g_ret_pc_to_native_func->insert({ret_addr, native_func});
   }
   if (char *name = g_func_to_name->lookup(native_func)) {
-    print("called");
-    print(name);
+    print("called %s", name);
   }
   return native_func;
 }
@@ -473,7 +479,7 @@ public:
     llvm::sys::DynamicLibrary::AddSymbol(
         "unwrap_ref", reinterpret_cast<void *>(unwrap_raw_ref));
     llvm::sys::DynamicLibrary::AddSymbol(
-        "print", reinterpret_cast<void *>(print<char *>));
+        "print", reinterpret_cast<void *>(print));
     llvm::sys::DynamicLibrary::AddSymbol(
         "lookup_native_func", reinterpret_cast<void *>(lookup_native_func));
     llvm::sys::DynamicLibrary::AddSymbol(
@@ -566,15 +572,16 @@ public:
       builder.CreateRet(ret);
     }
 
-    auto MM = make_unique<SectionMemoryManagerWrapper>(
-        memory_manager_, [this, short_sig_str](Codeblock blk) {
-          signature_to_code_.insert({short_sig_str, blk});
-        });
-    jit_->addModule(std::move(module), std::move(MM));
+    jit_->addModule(std::move(module));
     auto func_symbol = jit_->findSymbol(name);
-    void *result = (void *)func_symbol.getAddress();
-
-    return result;
+    auto maybe_address = func_symbol.getAddress();
+    if (maybe_address) {
+      Codeblock blk = jit_->getLastCodeBlock();
+      signature_to_code_.insert({short_sig_str, blk});
+      return reinterpret_cast<void*>(maybe_address.get());
+    } else {
+      return nullptr;
+    }
   }
 
   void *get_transparent_wrapper(const char *name, char *signature,
@@ -597,19 +604,20 @@ public:
     }
     if (sym_address != nullptr &&
         sym_address != (void *)prototype_block.data()) {
-      print("ERROR: non-0 offset function start");
-      print(name);
-      print(signature);
-      print(((uint8_t *)sym_address) - prototype_block.data());
+      print("ERROR: non-0 offset function start name:%s signature:%s"
+            " offset:%zd",
+            name, signature,
+            ((uint8_t *)sym_address) - prototype_block.data());
       return nullptr;
     }
 
-    uint8_t *new_block_mem = memory_manager_.allocateCodeSection(
+    auto &memory_manager = jit_->getSectionMemoryManager();
+    uint8_t *new_block_mem = memory_manager.allocateCodeSection(
         prototype_block.size(), 16, 1, ".text");
 
     memcpy(new_block_mem, prototype_block.data(), prototype_block.size());
-    memory_manager_.finalizeMemory();
-    memory_manager_.invalidateInstructionCache();
+    memory_manager.finalizeMemory();
+    memory_manager.invalidateInstructionCache();
     Codeblock copy_block(new_block_mem, prototype_block.size());
     register_native_func(name, copy_block, func_ptr);
 
@@ -620,7 +628,6 @@ private:
   std::unique_ptr<LLVMContext> context_;
   std::unique_ptr<LlvmJit> jit_;
   StringMap<Codeblock> signature_to_code_;
-  SectionMemoryManager memory_manager_;
   std::string error_str;
   IntervalMap<uint64_t, void *>::Allocator allocator_;
 };
@@ -631,13 +638,9 @@ void *gen_function(char *name, char *signature, void *func_ptr) {
   static Codegen codegen;
   void *result = codegen.get_transparent_wrapper(name, signature, func_ptr);
   if (result == nullptr) {
-    print("codegen error");
-    print(name);
-    print(signature);
+    print("codegen error func:%s, signature:%s", name, signature);
   } else {
-    print("codegen OK");
-    print(name);
-    print(signature);
+    print("codegen OK func:%s, signature:%s", name, signature);
   }
   return result;
 }

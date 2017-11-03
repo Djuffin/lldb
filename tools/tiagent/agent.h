@@ -34,9 +34,7 @@ ConvertSignatureToFunctionType(const MethodSignature &signature,
 
 bool IsSystemFunction(void *fp);
 
-template <class T> void print(const T &x);
-
-inline void print(const char *x) { print(std::string(x)); }
+void print(const char *fmt, ...);
 
 void *gen_function(char *name, char *signature, void *func_ptr);
 
