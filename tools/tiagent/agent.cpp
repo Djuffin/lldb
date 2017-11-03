@@ -314,10 +314,11 @@ void print(const char *fmt, ...) {
   static std::mutex g_print_mutex;
   std::lock_guard<std::mutex> lock(g_print_mutex);
 
-  FILE *f = fopen("/data/local/tmp/agent_log.txt", "a+");
+  FILE *f = fopen("/data/data/com.eugene.sum/agent_log.txt", "a+");
   va_list args;
   va_start(args, fmt);
   vfprintf(f, fmt, args);
+  fprintf(f, "\n");
   fclose(f);
   va_end(args);
 }
@@ -670,13 +671,15 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
   if (error != JNI_OK)
     return;
   {
-    bool blacklisted = IsSystemFunction(address);
+    bool blacklisted = true; //IsSystemFunction(address);
     if (!blacklisted) {
       void *f = gen_function(method_name_ptr, method_signature_ptr, address);
       if (f) {
         *new_address_ptr = f;
       }
     }
+    print("NativeMethodBind class: %s method: %s",
+      class_signature_ptr, method_name_ptr);
   }
 
   jni_env->DeleteLocalRef(declaring_class);
@@ -698,11 +701,11 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options,
     return 1;
 
   // Hook up event callbacks
-  jvmtiEventCallbacks callbacks = {};
-  callbacks.NativeMethodBind = &NativeMethodBind;
-  error = ti->SetEventCallbacks(&callbacks, sizeof(callbacks));
-  if (error != JNI_OK)
-    return 1;
+  // jvmtiEventCallbacks callbacks = {};
+  // callbacks.NativeMethodBind = &NativeMethodBind;
+  // error = ti->SetEventCallbacks(&callbacks, sizeof(callbacks));
+  // if (error != JNI_OK)
+  //   return 1;
 
   jvmtiCapabilities caps;
   error = ti->GetPotentialCapabilities(&caps);
@@ -713,8 +716,8 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options,
   if (error != JNI_OK)
     return 1;
 
-  error = ti->SetEventNotificationMode(JVMTI_ENABLE,
-                                       JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
+  // error = ti->SetEventNotificationMode(JVMTI_ENABLE,
+  //                                      JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
   if (error != JNI_OK)
     return 1;
 

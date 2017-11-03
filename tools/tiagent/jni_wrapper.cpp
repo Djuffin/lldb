@@ -1,10 +1,14 @@
 #include "jni_wrapper.h"
 #include "agent.h"
 #include <mutex>
+#include <iostream>
+#include <vector>
+#include <numeric>
+#include <chrono>
 
 using namespace llvm;
 
-constexpr uint64_t kRefMask = (1ull << 62);
+constexpr uint64_t kRefMask = 0;//(1ull << 62);
 
 static jvmtiEnv *ti;
 static jniNativeInterface *old_native_table;
@@ -150,17 +154,26 @@ SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
   return result;
 }
 
+uint64_t get_milliseconds() {
+  static auto app_start = std::chrono::system_clock::now();
+  auto now = std::chrono::system_clock::now();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    now - app_start).count();
+}
+
 #define PRINT_FUNCTION()                                                       \
-  static int i = 0;                                                            \
-  if (i++ < 100) {                                                             \
     print(__FUNCTION__);                                                       \
-  }
 
 #define JNI_WRAPPER_HEADER()                                                   \
+  static std::mutex g_mutex; \
+  std::lock_guard<std::mutex> lock(g_mutex);    \
   RefWrapper RW(__builtin_return_address(0));                                  \
-  if (!RW.is_system) {                                                         \
-    PRINT_FUNCTION()                                                           \
-  }
+  int is_system = RW.is_system ? 1 : 0;                              \
+  static int counter = 0; \
+  counter++; \
+  print ("%" PRIu64 ",%d,%s,%d", get_milliseconds(),  \
+                    is_system, __FUNCTION__, counter);
+
 
 #define DEFINE_CALL_WITH_TYPE(RetType, MethodName)                             \
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, \
@@ -1101,6 +1114,11 @@ const jniNativeInterface *GetOverriddenJniTableMethods() {
       W_GetDirectBufferAddress,
       W_GetDirectBufferCapacity,
       W_GetObjectRefType};
+
+  g_jniNativeInterface = *old_native_table;
+  g_jniNativeInterface.NewGlobalRef = W_NewGlobalRef;
+  g_jniNativeInterface.DeleteGlobalRef = W_DeleteGlobalRef;
+
   return &g_jniNativeInterface;
 }
 
