@@ -42,12 +42,14 @@
 #include "jvmti.h"
 #include <fcntl.h>
 #include <fstream>
+#include <iostream>
 #include <jni.h>
 #include <mutex>
 #include <stdio.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include <fcntl.h>
 #include <string.h>
@@ -58,6 +60,7 @@
 
 using namespace llvm;
 using namespace llvm::orc;
+#undef CODEGEN
 
 
 struct ModuleSO {
@@ -310,11 +313,19 @@ llvm::Optional<MethodSignature> ParseJavaSignature(const char *str,
   return result;
 };
 
+static std::string GetAppDataPath() {
+  Dl_info dl_info;
+  dladdr((void*)Agent_OnAttach, &dl_info);
+  std::string so_path(dl_info.dli_fname);
+  return so_path.substr(0, so_path.find_last_of('/') + 1);
+}
+
 void print(const char *fmt, ...) {
+  static std::string log_file_name = GetAppDataPath() + "/agent_log.txt";
   static std::mutex g_print_mutex;
   std::lock_guard<std::mutex> lock(g_print_mutex);
 
-  FILE *f = fopen("/data/data/com.eugene.sum/agent_log.txt", "a+");
+  FILE *f = fopen(log_file_name.c_str(), "a+");
   va_list args;
   va_start(args, fmt);
   vfprintf(f, fmt, args);
@@ -349,6 +360,7 @@ bool IsDebuggerPresent() {
 
 typedef ArrayRef<uint8_t> Codeblock;
 
+#ifdef CODEGEN
 class SectionMemoryManagerWrapper : public SectionMemoryManager {
   SectionMemoryManager &SM;
   Codeblock &last_codeblock_ptr_;
@@ -646,15 +658,6 @@ void *gen_function(char *name, char *signature, void *func_ptr) {
   return result;
 }
 
-jvmtiEnv *CreateJvmtiEnv(JavaVM *vm) {
-  jvmtiEnv *jvmti_env;
-  jint result = vm->GetEnv((void **)&jvmti_env, JVMTI_VERSION_1_2);
-  if (result != JNI_OK) {
-    return nullptr;
-  }
-  return jvmti_env;
-}
-
 void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
                               jmethodID method, void *address,
                               void **new_address_ptr) {
@@ -688,6 +691,19 @@ void JNICALL NativeMethodBind(jvmtiEnv *ti, JNIEnv *jni_env, jthread thread,
   ti->Deallocate((unsigned char *)class_signature_ptr);
 }
 
+
+#endif //CODEGEN
+
+jvmtiEnv *CreateJvmtiEnv(JavaVM *vm) {
+  jvmtiEnv *jvmti_env;
+  jint result = vm->GetEnv((void **)&jvmti_env, JVMTI_VERSION_1_2);
+  if (result != JNI_OK) {
+    return nullptr;
+  }
+  return jvmti_env;
+}
+
+
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
   return Agent_OnAttach(vm, options, reserved);
 }
@@ -700,13 +716,6 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options,
   if (ti == nullptr)
     return 1;
 
-  // Hook up event callbacks
-  // jvmtiEventCallbacks callbacks = {};
-  // callbacks.NativeMethodBind = &NativeMethodBind;
-  // error = ti->SetEventCallbacks(&callbacks, sizeof(callbacks));
-  // if (error != JNI_OK)
-  //   return 1;
-
   jvmtiCapabilities caps;
   error = ti->GetPotentialCapabilities(&caps);
   if (error != JNI_OK)
@@ -716,10 +725,19 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options,
   if (error != JNI_OK)
     return 1;
 
-  // error = ti->SetEventNotificationMode(JVMTI_ENABLE,
-  //                                      JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
+#ifdef CODEGEN
+  // Hook up event callbacks
+  jvmtiEventCallbacks callbacks = {};
+  callbacks.NativeMethodBind = &NativeMethodBind;
+  error = ti->SetEventCallbacks(&callbacks, sizeof(callbacks));
   if (error != JNI_OK)
     return 1;
+
+   error = ti->SetEventNotificationMode(JVMTI_ENABLE,
+                                        JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr);
+  if (error != JNI_OK)
+    return 1;
+#endif //CODEGETN
 
   // while (!IsDebuggerPresent()) {
   //   sleep(0);

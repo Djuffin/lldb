@@ -14,10 +14,10 @@ add_lldb_library(tiagent SHARED
     Support
     MCJIT
     OrcJIT
-    AArch64CodeGen
-    AArch64Desc
-    AArch64Info
-    AArch64AsmParser
+    # AArch64CodeGen
+    # AArch64Desc
+    # AArch64Info
+    # AArch64AsmParser
     # X86CodeGen
     # X86Desc
     # X86Info
