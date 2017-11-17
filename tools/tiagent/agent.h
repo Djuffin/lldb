@@ -21,6 +21,9 @@ enum class JavaType : uint8_t {
 struct MethodSignature {
   llvm::SmallVector<JavaType, 8> arguments;
   JavaType return_type;
+  char *method_name;
+  char *method_signature;
+  char *class_signature;
 };
 
 llvm::SmallString<8> SignatureToShortString(const MethodSignature &sig);

@@ -51,7 +51,8 @@ void enter_user_native_code(JNIEnv *env) {}
 
 void leave_user_native_code(JNIEnv *env) {}
 
-const MethodSignature *GetMethodSignature(jmethodID methodID) {
+const MethodSignature *GetMethodSignature(JNIEnv *env, jmethodID methodID) {
+  if (methodID == nullptr) return nullptr;
   static std::mutex g_mutex;
   std::lock_guard<std::mutex> lock(g_mutex);
   static DenseMap<void *, MethodSignature *> g_id_to_signature(1000);
@@ -60,23 +61,37 @@ const MethodSignature *GetMethodSignature(jmethodID methodID) {
   if (sig_ptr == nullptr) {
     char *method_name_ptr = nullptr;
     char *method_signature_ptr = nullptr;
+    char *class_signature_ptr = nullptr;
+    jclass declaring_class = nullptr;
     jvmtiError error = ti->GetMethodName(methodID, &method_name_ptr,
                                          &method_signature_ptr, nullptr);
+
     ASSERT(error == JNI_OK);
+    error = ti->GetMethodDeclaringClass(methodID, &declaring_class);
+    ASSERT(error == JNI_OK);
+    error = ti->GetClassSignature(declaring_class, &class_signature_ptr,
+                                  nullptr);
+    ASSERT(error == JNI_OK);
+    old_native_table->DeleteLocalRef(env, declaring_class);
+
     auto signature = ParseJavaSignature(method_signature_ptr);
-    ti->Deallocate((unsigned char *)method_name_ptr);
-    ti->Deallocate((unsigned char *)method_signature_ptr);
+    //ti->Deallocate((unsigned char *)method_name_ptr);
+    //ti->Deallocate((unsigned char *)method_signature_ptr);
+    //ti->Deallocate((unsigned char *)class_signature_ptr);
     if (signature) {
       sig_ptr = new MethodSignature(signature.getValue());
+      sig_ptr->method_name = method_name_ptr;
+      sig_ptr->method_signature = method_signature_ptr;
+      sig_ptr->class_signature = class_signature_ptr;
       g_id_to_signature.insert({voidMethodID, sig_ptr});
     }
   }
   return sig_ptr;
 }
 
-SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
-                                          va_list args) {
-  const MethodSignature *signature = GetMethodSignature(methodID);
+SmallVector<jvalue, 5> UnwrapAllArguments(JNIEnv *env, RefWrapper &RW,
+                                          jmethodID methodID, va_list args) {
+  const MethodSignature *signature = GetMethodSignature(env, methodID);
   ASSERT(signature != nullptr);
   SmallVector<jvalue, 5> result;
   result.reserve(signature->arguments.size());
@@ -120,9 +135,9 @@ SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
   return result;
 }
 
-SmallVector<jvalue, 5> UnwrapAllArguments(RefWrapper &RW, jmethodID methodID,
-                                          const jvalue *args) {
-  const MethodSignature *signature = GetMethodSignature(methodID);
+SmallVector<jvalue, 5> UnwrapAllArguments(JNIEnv *env, RefWrapper &RW,
+                                    jmethodID methodID, const jvalue *args) {
+  const MethodSignature *signature = GetMethodSignature(env, methodID);
   ASSERT(signature != nullptr);
   SmallVector<jvalue, 5> result;
   const jvalue *arg = args;
@@ -161,216 +176,214 @@ uint64_t get_milliseconds() {
                                     now - app_start).count();
 }
 
-#define PRINT_FUNCTION()                                                       \
-    print(__FUNCTION__);                                                       \
+void print_jni_call(const char *name, bool is_system, int counter,
+                    const MethodSignature *sig) {
+  if (sig == nullptr) {
+    print ("%" PRIu64 ",%d,%s,%d", get_milliseconds(),
+                    (is_system ? 1 : 0), name, counter);
+  } else {
 
-#define JNI_WRAPPER_HEADER()                                                   \
-  static std::mutex g_mutex; \
-  std::lock_guard<std::mutex> lock(g_mutex);    \
+    print ("%" PRIu64 ",%d,%s,%d,%s.%s(%s)", get_milliseconds(),
+                    (is_system ? 1 : 0), name, counter,
+                    sig->class_signature, sig->method_name,
+                    sig->method_signature);
+  }
+}
+
+#define JNI_HEADER(m_id)                                              \
   RefWrapper RW(__builtin_return_address(0));                                  \
-  int is_system = RW.is_system ? 1 : 0;                              \
   static int counter = 0; \
-  counter++; \
-  print ("%" PRIu64 ",%d,%s,%d", get_milliseconds(),  \
-                    is_system, __FUNCTION__, counter);
+  { \
+      static std::mutex g_mutex; \
+      std::lock_guard<std::mutex> lock(g_mutex);\
+      counter++;\
+  }\
+  const MethodSignature *method_sig = GetMethodSignature(env, m_id); \
+  print_jni_call(__FUNCTION__, RW.is_system, counter, method_sig);
 
+#define JNI_WRAPPER_HEADER()  JNI_HEADER(nullptr)
+
+#define JNI_CALL_HEADER()  JNI_HEADER(methodID)
 
 #define DEFINE_CALL_WITH_TYPE(RetType, MethodName)                             \
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  ...) {                                        \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, obj, methodID,               \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, obj, methodID,               \
+                                             args);           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj,                  \
                                     jmethodID methodID, va_list args) {        \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, obj, methodID,               \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, obj, methodID,               \
+                                             args);           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj,                  \
                                     jmethodID methodID, const jvalue *args) {  \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     result = old_native_table->MethodName##A(env, obj, methodID,               \
-                                             unwrapperdArgs.data());           \
+                                             args);           \
     return WRAP(result);                                                       \
   }
 
 #define DEFINE_VOID_CALL(MethodName)                                           \
   JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jmethodID methodID,    \
                               ...) {                                           \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, obj, methodID,                        \
-                                    unwrapperdArgs.data());                    \
+    old_native_table->MethodName##V(env, obj, methodID,                        \
+                                    args);                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  va_list args) {                               \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, obj, methodID,                        \
-                                    unwrapperdArgs.data());                    \
+                  \
+    old_native_table->MethodName##V(env, obj, methodID,                        \
+                                    args);                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jmethodID methodID, \
                                  const jvalue *args) {                         \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     old_native_table->MethodName##A(env, obj, methodID,                        \
-                                    unwrapperdArgs.data());                    \
+                                    args);                    \
   }
 
 #define DEFINE_NONVIRT_CALL_WITH_TYPE(RetType, MethodName)                     \
   JNICALL RetType W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, ...) {                    \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, obj, clazz, methodID,        \
+                                             args);           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,    \
                                     jmethodID methodID, va_list args) {        \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, obj, clazz, methodID,        \
+                                             args);           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,    \
                                     jmethodID methodID, const jvalue *args) {  \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     result = old_native_table->MethodName##A(env, obj, clazz, methodID,        \
-                                             unwrapperdArgs.data());           \
+                                             args);           \
     return WRAP(result);                                                       \
   }
 
 #define DEFINE_NONVIRT_VOID_CALL(MethodName)                                   \
   JNICALL void W_##MethodName(JNIEnv *env, jobject obj, jclass clazz,          \
                               jmethodID methodID, ...) {                       \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
-                                    unwrapperdArgs.data());                    \
+    old_native_table->MethodName##V(env, obj, clazz, methodID,                 \
+                                    args);                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, va_list args) {           \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
-                                    unwrapperdArgs.data());                    \
+    old_native_table->MethodName##V(env, obj, clazz, methodID,                 \
+                                    args);                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jobject obj, jclass clazz,       \
                                  jmethodID methodID, const jvalue *args) {     \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     obj = RW.unwrap_ref(obj);                                                  \
     clazz = RW.unwrap_ref(clazz);                                              \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     old_native_table->MethodName##A(env, obj, clazz, methodID,                 \
-                                    unwrapperdArgs.data());                    \
+                                    args);                    \
   }
 
 #define DEFINE_STATIC_CALL_WITH_TYPE(RetType, MethodName)                      \
   JNICALL RetType W_##MethodName(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, ...) {                    \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
     va_list args;                                                              \
     RetType result;                                                            \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, clazz, methodID,             \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, clazz, methodID,             \
+                                             args);           \
     va_end(args);                                                              \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##V(JNIEnv *env, jclass clazz,                 \
                                     jmethodID methodID, va_list args) {        \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    result = old_native_table->MethodName##A(env, clazz, methodID,             \
-                                             unwrapperdArgs.data());           \
+    result = old_native_table->MethodName##V(env, clazz, methodID,             \
+                                             args);           \
     return WRAP(result);                                                       \
   }                                                                            \
   JNICALL RetType W_##MethodName##A(JNIEnv *env, jclass clazz,                 \
                                     jmethodID methodID, const jvalue *args) {  \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
     RetType result;                                                            \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     result = old_native_table->MethodName##A(env, clazz, methodID,             \
-                                             unwrapperdArgs.data());           \
+                                             args);           \
     return WRAP(result);                                                       \
   }
 
 #define DEFINE_STATIC_VOID_CALL(MethodName)                                    \
   JNICALL void W_##MethodName(JNIEnv *env, jclass clazz, jmethodID methodID,   \
                               ...) {                                           \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
     va_list args;                                                              \
     va_start(args, methodID);                                                  \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, clazz, methodID,                      \
-                                    unwrapperdArgs.data());                    \
+    old_native_table->MethodName##V(env, clazz, methodID,                      \
+                                    args);                    \
     va_end(args);                                                              \
   }                                                                            \
   JNICALL void W_##MethodName##V(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, va_list args) {           \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
-    old_native_table->MethodName##A(env, clazz, methodID,                      \
-                                    unwrapperdArgs.data());                    \
+    old_native_table->MethodName##V(env, clazz, methodID,                      \
+                                    args);                    \
   }                                                                            \
   JNICALL void W_##MethodName##A(JNIEnv *env, jclass clazz,                    \
                                  jmethodID methodID, const jvalue *args) {     \
-    JNI_WRAPPER_HEADER()                                                       \
+    JNI_CALL_HEADER()                                                       \
     clazz = RW.unwrap_ref(clazz);                                              \
-    auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);              \
     old_native_table->MethodName##A(env, clazz, methodID,                      \
-                                    unwrapperdArgs.data());                    \
+                                    args);                    \
   }
 
 #define DEFINE_FIELD_GETTER(FieldType, TypeName)                               \
@@ -493,9 +506,9 @@ JNICALL jobject W_NewObject(JNIEnv *env, jclass clazz, jmethodID methodID,
   clazz = RW.unwrap_ref(clazz);
   va_list args;
   va_start(args, methodID);
-  auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);
+
   jobject result =
-      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectV(env, clazz, methodID, args);
   va_end(args);
   return RW.wrap_ref(result);
 }
@@ -504,18 +517,18 @@ JNICALL jobject W_NewObjectV(JNIEnv *env, jclass clazz, jmethodID methodID,
                              va_list args) {
   JNI_WRAPPER_HEADER()
   clazz = RW.unwrap_ref(clazz);
-  auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);
+
   jobject result =
-      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectV(env, clazz, methodID, args);
   return RW.wrap_ref(result);
 }
 JNICALL jobject W_NewObjectA(JNIEnv *env, jclass clazz, jmethodID methodID,
                              const jvalue *args) {
   JNI_WRAPPER_HEADER()
   clazz = RW.unwrap_ref(clazz);
-  auto unwrapperdArgs = UnwrapAllArguments(RW, methodID, args);
+
   jobject result =
-      old_native_table->NewObjectA(env, clazz, methodID, unwrapperdArgs.data());
+      old_native_table->NewObjectA(env, clazz, methodID, args);
   return RW.wrap_ref(result);
 }
 
@@ -1115,10 +1128,13 @@ const jniNativeInterface *GetOverriddenJniTableMethods() {
       W_GetDirectBufferCapacity,
       W_GetObjectRefType};
 
-  g_jniNativeInterface = *old_native_table;
-  g_jniNativeInterface.NewGlobalRef = W_NewGlobalRef;
-  g_jniNativeInterface.DeleteGlobalRef = W_DeleteGlobalRef;
-
+  g_jniNativeInterface.ExceptionCheck = old_native_table->ExceptionCheck;
+  g_jniNativeInterface.PopLocalFrame = old_native_table->PopLocalFrame;
+  g_jniNativeInterface.PushLocalFrame = old_native_table->PushLocalFrame;
+  g_jniNativeInterface.NewLocalRef = old_native_table->NewLocalRef;
+  g_jniNativeInterface.DeleteLocalRef = old_native_table->DeleteLocalRef;
+  g_jniNativeInterface.IsSameObject = old_native_table->IsSameObject;
+  g_jniNativeInterface.ExceptionOccurred = old_native_table->ExceptionOccurred;
   return &g_jniNativeInterface;
 }
 
